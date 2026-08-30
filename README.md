@@ -13,12 +13,24 @@ de **capacités hétérogènes**.
 Publié automatiquement sur GitHub Pages à chaque push sur `main` :
 **https://viruseb.github.io/bottlesort/**
 
-Le workflow ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) publie le contenu
-du dossier `web/`. L'étape de build sera branchée dedans quand l'application existera ; le site
-étant servi depuis le sous-chemin `/bottlesort/`, le bundler devra être configuré avec cette
-base.
+Le workflow ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) installe les
+dépendances, lance les tests, construit le site et publie `dist/`. Le site étant servi depuis le
+sous-chemin `/bottlesort/`, `vite.config.ts` fixe `base: '/bottlesort/'` — sans quoi les chemins
+d'assets pointeraient sur la racine du domaine et la page resterait blanche.
+
+## Développement
+
+```sh
+npm install
+npm run dev     # serveur de développement
+npm test        # tests unitaires (Vitest)
+npm run build   # vérification TypeScript puis build de production
+```
+
+La version de Node est épinglée dans `.nvmrc` et reprise par la CI, pour qu'une génération
+locale et une génération en CI produisent le même résultat.
 
 ## État
 
-Définition des règles en cours. Le jeu n'est pas encore développé — `web/index.html` est une
-page d'attente qui sert à valider la chaîne de publication.
+Les règles sont définies. Le jeu n'est pas encore développé — la page actuelle est une page
+d'attente. Prochaine étape : le moteur de règles en TypeScript pur, avec ses tests.
