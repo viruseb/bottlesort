@@ -1,277 +1,299 @@
 # Défi entre amis et classement — spécification
 
-> Statut : **spécification fonctionnelle v0.1** — document de conception, aucun code.
+> Statut : **spécification fonctionnelle v0.2** — document de conception, aucun code.
 > Toute décision marquée `[À CONFIRMER]` doit être tranchée avant l'implémentation.
+>
+> La v0.1 proposait de faire voyager le classement dans les liens eux-mêmes, sans serveur. Cette
+> piste est **abandonnée** : voir §2.
 
 ---
 
 ## 1. Le besoin
 
 Ce qui amuse à plusieurs n'est pas de jouer chacun dans son coin, c'est de **se mesurer sur un
-puzzle donné** : qui le résoudra en le moins de coups. Le parcours visé :
+puzzle donné** : qui le résoudra en le moins de coups.
 
 1. un joueur envoie un lien sur WhatsApp ;
 2. celui qui le reçoit ouvre **exactement le même puzzle** ;
 3. on lui demande son pseudo s'il n'en a pas encore ;
 4. à la victoire, son score rejoint un **classement** consultable depuis l'accueil.
 
-Le classement présente, par niveau, le podium des meilleurs scores.
+---
+
+## 2. Pourquoi un vrai serveur
+
+La v0.1 faisait voyager le classement dans les liens : chaque lien portait la table connue de
+son expéditeur, et le destinataire fusionnait. C'était astucieux, et c'est une mauvaise idée.
+
+**Deux défauts rédhibitoires :**
+
+- **Rafraîchir le site n'apporte rien.** Ouvrir le jeu normalement, ou recharger la page pour
+  voir où en sont les amis, ne montre que ce qu'on savait déjà. Le classement n'avance qu'à
+  réception d'un lien. C'est le contraire de ce qu'on attend d'un classement.
+- **Le lien enfle.** Il grossit à chaque score accumulé, jusqu'à devenir un pavé illisible dans
+  une conversation — au moment précis où le partage doit rester léger.
+
+**GitHub ne peut pas servir de backend.** GitHub Pages ne sert que des fichiers statiques, sans
+la moindre exécution côté serveur. Les Actions savent exécuter du code, mais se déclenchent sur
+des évènements de dépôt : les appeler depuis un navigateur exigerait un jeton d'écriture embarqué
+dans la page, donc public, donc utilisable par n'importe qui pour écrire dans le dépôt. Idem pour
+l'API des issues ou des discussions. **Il n'existe pas de produit de fonctions serverless chez
+GitHub.** GitHub reste l'hébergeur du site et le déclencheur du déploiement — pas le serveur.
 
 ---
 
-## 2. Le point dur : un classement partagé demande normalement un serveur
+## 3. Le choix : Cloudflare Workers + KV
 
-Le jeu est un site **statique** sur GitHub Pages : pas de base de données, pas d'API, rien qui
-puisse retenir un score écrit par un joueur et le montrer à un autre. `localStorage` est
-strictement local à un navigateur — il ne traverse jamais d'un téléphone à l'autre.
-
-Il faut donc choisir. Trois options, par coût croissant.
-
-| Option | Ce que ça donne | Ce que ça coûte |
+| Option | Pour | Contre |
 |---|---|---|
-| **A. Sans serveur, le classement voyage dans les liens** | Chacun voit le classement que les liens reçus lui ont apporté | Rien. Reste sur GitHub Pages |
-| **B. Petit service serverless** (Cloudflare Workers + KV, Supabase, Firebase…) | Un classement mondial, unique et cohérent | Un compte, une clé d'API, du CORS, une facture éventuelle, de la modération |
-| **C. GitHub comme base** (issues, fichier commité par une Action) | Persistance gratuite | Exige un jeton d'écriture côté client — **inacceptable**, il serait public |
+| **Cloudflare Workers + KV** | Un seul fichier, aucun serveur à administrer, offre gratuite très au-delà du besoin, déployable depuis le workflow GitHub existant, CORS trivial, latence faible partout | Un compte Cloudflare à créer |
+| Supabase | Base Postgres, API REST générée, authentification incluse | Clé publique dans le client, sécurité entièrement portée par les politiques d'accès ; projet gratuit mis en veille après inactivité — pénible pour un jeu utilisé par à-coups ; une base à modéliser pour trois colonnes |
+| Firebase | Mature, temps réel | Même modèle de clé publique, SDK lourd dans le bundle, compte Google |
+| Deno Deploy / Val Town | Aussi simples que Workers | Écosystème plus étroit, offres gratuites plus mouvantes |
+| Netlify / Vercel Functions | Fonctions serverless classiques | Suppose de déplacer l'hébergement, ou d'en gérer deux |
 
-**Recommandation : l'option A.** Non par défaut mais parce qu'elle correspond au besoin réel.
-Le classement souhaité est celui d'un groupe WhatsApp, pas celui de la planète. L'option A part
-en ligne aujourd'hui, ne coûte rien, n'expose aucune donnée à un tiers et ne demande à personne
-de créer un compte. L'option B reste ouverte plus tard sans rien jeter : le modèle de données
-ci-dessous est le même, seul le transport change.
+**Recommandation : Cloudflare Workers + KV.** Le classement est un petit JSON par niveau ; il n'y
+a rien à modéliser, rien à administrer, et le tout tient dans un fichier vivant dans ce dépôt. Ce
+n'est pas une base de données déguisée en jeu, c'est trois routes.
 
-### 2.1 Comment un classement peut voyager sans serveur
+À ce jour, l'offre gratuite est de l'ordre de 100 000 requêtes par jour côté Worker et de
+100 000 lectures et 1 000 écritures par jour côté KV. Un groupe d'amis en consomme quelques
+dizaines. `[À CONFIRMER]` — vérifier les quotas en vigueur au moment de l'implémentation, ils
+bougent.
 
-L'astuce tient en une phrase : **chaque lien transporte tout le classement connu de son
-expéditeur**, et le destinataire fusionne.
-
-```
-Alice finit en 11 coups  → envoie un lien contenant [Alice 11]
-Bob l'ouvre, finit en 10 → son lien contient       [Alice 11, Bob 10]
-Chloé l'ouvre, finit en 12 → son lien contient     [Alice 11, Bob 10, Chloé 12]
-```
-
-Dans un groupe, le dernier message porte toujours la table la plus complète, et il suffit
-d'ouvrir un lien récent pour se mettre à jour. La fusion est **commutative et idempotente** — on
-garde le meilleur score par couple (niveau, pseudo) — donc l'ordre d'arrivée des liens n'a aucune
-importance et un même lien peut être ouvert dix fois sans dégât.
-
-C'est la propriété qui rend l'option A viable : sans elle, il faudrait que chacun clique sur le
-lien de chacun.
+`[À CONFIRMER]` **D1 (SQLite) plutôt que KV** si l'on veut interroger autrement que par clé —
+par exemple un classement global tous niveaux confondus. KV suffit au besoin décrit.
 
 ---
 
-## 3. Parcours
+## 4. Architecture
 
-### 3.1 Défier
+```
+Navigateur (GitHub Pages, statique)
+  |  GET  /r/:room/board          → le classement d'un salon
+  |  POST /r/:room/score          → soumettre un score, avec sa preuve
+  v
+Worker Cloudflare  ──  rejoue la partie sur le moteur  ──  KV
+```
 
-Depuis l'écran de victoire ou depuis un niveau en cours, un bouton **« Défier un ami »** :
+Le Worker **partage le moteur de règles du jeu**. C'est possible parce que `src/engine/` est du
+TypeScript pur, sans la moindre référence au DOM — une contrainte posée dès le lot 1 et qui paie
+ici : aucune réimplémentation des règles côté serveur, donc aucune divergence possible entre ce
+que le jeu accepte et ce que le serveur valide.
 
-1. construit le lien de défi (§4) ;
-2. utilise l'**API de partage native** (`navigator.share`) quand elle existe — sur mobile, elle
-   ouvre directement le sélecteur d'applications, WhatsApp compris ;
-3. sinon, copie le lien dans le presse-papiers et le dit.
+### 4.1 Salons
 
-Le message proposé par défaut : *« Je fais ce puzzle en 11 coups. Tu fais mieux ? »*
+Un **salon** (`room`) est un identifiant court et opaque partagé par un groupe d'amis, contenu
+dans le lien de défi. Trois raisons :
 
-### 3.2 Recevoir
+- le classement d'un groupe reste entre ses membres, plutôt que d'être noyé dans un classement
+  mondial où l'on ne connaît personne ;
+- la surface d'abus est cloisonnée : polluer un salon ne pollue que lui ;
+- aucune inscription : appartenir au groupe, c'est avoir le lien.
 
-À l'ouverture d'un lien de défi :
-
-1. le puzzle est reconstruit depuis le lien, à l'identique ;
-2. si aucun pseudo n'est enregistré localement, **on le demande** avant de jouer (§6) ;
-3. le classement contenu dans le lien est fusionné dans le classement local ;
-4. l'écran de jeu s'ouvre en mode défi, avec le score à battre affiché.
-
-### 3.3 Publier son score
-
-À la victoire en mode défi, l'écran propose **« Renvoyer mon score »**, qui construit un nouveau
-lien de défi incluant le score qui vient d'être fait. La boucle se referme.
+Le salon est créé à la volée à la première soumission. Identifiant tiré au hasard, assez long
+pour ne pas se deviner (`[À CONFIRMER]` — 10 à 12 caractères).
 
 ---
 
-## 4. Le lien de défi
-
-### 4.1 Ce qu'il doit contenir
-
-- **Le puzzle lui-même**, et non une graine. Une graine ne reproduit le même niveau que si le
-  code du générateur est resté rigoureusement identique (§6.4 des règles) : un lien vieux de deux
-  versions ouvrirait un autre puzzle, ce qui ruinerait la comparaison. Le contenu est court, il
-  n'y a aucune raison de prendre ce risque.
-- **La clé du niveau**, qui sert de ligne au classement.
-- **Les scores connus de l'expéditeur**, chacun avec sa liste de coups (§5).
-
-### 4.2 Forme
+## 5. Le lien de défi
 
 ```
-https://viruseb.github.io/bottlesort/#d=<charge utile en base64url>
+https://viruseb.github.io/bottlesort/#c=<niveau>&r=<salon>
 ```
 
-Le **fragment** (`#`) plutôt qu'une chaîne de requête : il n'est jamais envoyé au serveur, donc
-les pseudos et les scores ne finissent pas dans les journaux de GitHub Pages.
+**Court et de taille constante** — c'est tout l'intérêt du backend. Il ne contient plus que le
+puzzle et le salon ; les scores viennent de l'API.
 
-La charge utile est un objet compact, sérialisé puis encodé en base64url :
+Le lien porte **le puzzle lui-même, et non une graine**. Une graine ne reproduit le même niveau
+que si le code du générateur n'a pas bougé (§6.4 des règles) ; un lien vieux de deux versions
+ouvrirait un autre puzzle et ruinerait la comparaison. Un niveau de onze bouteilles tient en une
+soixantaine de caractères, il n'y a aucune raison de prendre ce risque.
 
-```
-v   version du format
-l   le niveau : capacité standard, collecteur (capacité, couleur, contenu), bouteilles
-k   clé du niveau — empreinte courte et déterministe de `l`
-s   scores : [pseudo, nombre de coups, coups joués] par entrée
-```
+Le fragment (`#`) plutôt qu'une chaîne de requête : il n'est pas transmis au serveur qui sert la
+page, donc le contenu du défi ne finit pas dans les journaux de GitHub Pages.
 
-### 4.3 Taille
-
-WhatsApp n'aime pas les liens interminables ; on vise **moins de 1 500 caractères**.
-
-| Élément | Ordre de grandeur |
-|---|---|
-| Un niveau de 11 bouteilles | ~70 caractères |
-| Un coup | 2 caractères |
-| Une entrée de score (pseudo + coups + liste) | ~40 caractères |
-
-Soit une trentaine d'entrées avant d'approcher la limite. **Plafond retenu** : les `N` meilleures
-entrées par niveau et les `M` niveaux les plus récents `[À CONFIRMER]`, avec repli sur un lien
-sans classement si la limite est malgré tout franchie.
+**La clé du niveau est dérivée du puzzle** — une empreinte déterministe de son contenu, calculée
+par le serveur et jamais par le client. Deux personnes qui résolvent le même puzzle, reçu par
+deux liens différents, atterrissent ainsi sur la même ligne du classement, et personne ne peut
+déclarer un score sur un niveau qu'il aurait inventé.
 
 ---
 
-## 5. Vérification par rejeu — l'anti-triche sans serveur
+## 6. Vérification côté serveur, par rejeu
 
-Un score qui arrive par une URL est, par construction, **fabricable à la main**. N'importe qui
-peut annoncer 1 coup.
+Un score soumis par un navigateur est, par construction, fabricable à la main. Le Worker
+n'accorde donc **aucune confiance au nombre annoncé** : la soumission porte **la liste des coups
+joués**, et le serveur la rejoue sur le moteur.
 
-La parade ne demande pourtant aucun serveur : **chaque entrée transporte la liste des coups qui
-l'ont produite**, et le destinataire la **rejoue sur le moteur**. Une entrée n'est acceptée que
-si :
+Un score n'est accepté que si :
 
 1. tous les coups sont légaux au sens du §3.1 des règles ;
 2. l'état final est gagné au sens du §5.1 ;
-3. le nombre de coups annoncé égale la longueur de la liste ;
-4. ce nombre est `>=` à l'optimum connu, quand il est connu.
+3. le nombre annoncé égale la longueur de la liste ;
+4. la charge utile reste sous une taille plafond.
 
-Une entrée qui échoue est **écartée silencieusement**, pas signalée : inutile d'accuser
-quelqu'un dont le lien a simplement été tronqué par une messagerie.
+C'est ici que la pureté du moteur porte ses fruits : rejouer quinze coups coûte une fraction de
+milliseconde, et le code qui valide est **exactement** celui qui joue.
 
-C'est le point qui rend l'option A honnête plutôt que déclarative. Le moteur de règles existe
-déjà, il est pur et tourne dans le navigateur : rejouer quinze coups coûte une fraction de
-milliseconde. **Aucune entrée non vérifiée n'entre au classement.**
-
-> Ce que cela ne protège pas : quelqu'un peut toujours faire résoudre le puzzle par le solveur et
-> publier la solution optimale. Contre un ami déterminé à tricher, rien ne protège sans serveur —
-> et un serveur ne protégerait pas davantage, puisque le puzzle est résolu côté client. On s'en
-> tient donc à empêcher le score inventé, pas le score assisté.
+> **Ce que cela ne protège pas**, et il faut le dire : rien n'empêche quelqu'un de faire résoudre
+> le puzzle par un solveur et de soumettre la solution optimale — elle est parfaitement valide.
+> Aucun serveur ne peut distinguer un humain doué d'un solveur, puisque le puzzle se résout côté
+> client. On empêche le score **inventé**, pas le score **assisté**. Entre amis, c'est
+> suffisant ; il faut simplement ne pas prétendre le contraire.
 
 ---
 
-## 6. Le pseudo
+## 7. Le pseudo
 
 - **Demandé à l'ouverture d'un lien de défi**, s'il n'est pas déjà en stockage local, avant de
-  jouer. `[À CONFIRMER]` — l'alternative est de ne le demander qu'à la victoire, ce qui réduit la
-  friction à l'entrée mais oblige à saisir quelque chose au moment de savourer.
-- **Modifiable** ensuite depuis l'accueil.
-- **Contraintes** : 2 à 16 caractères, espaces autorisés, découpé à la longueur maximale.
-- **Rien d'obligatoire ni de vérifié** : ce n'est pas un compte, aucune adresse, aucun mot de
-  passe. Un pseudo vide bascule sur un nom généré (« Joueur 42 ») plutôt que de bloquer.
+  jouer. Modifiable ensuite depuis l'accueil.
+- 2 à 16 caractères, espaces autorisés. Aucun compte, aucune adresse, aucun mot de passe.
+- Un pseudo vide bascule sur un nom généré plutôt que de bloquer.
 
-### 6.1 Sécurité — le pseudo est une donnée hostile
+### 7.1 Le pseudo est une donnée hostile
 
-Un pseudo arrive **par une URL écrite par quelqu'un d'autre**. Il doit donc être traité comme
-n'importe quelle entrée non fiable :
+Il arrive **par le réseau, écrit par quelqu'un d'autre**. Des deux côtés :
 
-- **jamais** injecté via `innerHTML` — uniquement `textContent`. Sans cette règle, un pseudo
-  contenant du balisage exécuterait du code chez tous les membres du groupe ;
-- longueur bornée à la lecture, avant tout affichage ;
-- caractères de contrôle et bidirectionnels retirés, faute de quoi un pseudo peut désordonner
-  l'affichage du tableau.
+- **Serveur** : longueur bornée, caractères de contrôle et bidirectionnels retirés, avant
+  écriture en KV.
+- **Client** : jamais injecté via `innerHTML`, uniquement `textContent`. Sans cette règle, un
+  pseudo contenant du balisage exécuterait du code chez tous les membres du salon.
 
-### 6.2 Données personnelles
-
-Rien ne quitte l'appareil sinon ce que le joueur envoie lui-même dans un lien. Aucun serveur,
-aucun traceur, aucun identifiant persistant au-delà du pseudo choisi. C'est un argument à tenir :
-l'option B y renoncerait en partie, et cela doit peser dans le choix.
+L'assainissement se fait **aux deux bouts**. Celui du serveur protège les données, celui du
+client protège l'affichage, et aucun des deux ne doit dépendre de l'autre.
 
 ---
 
-## 7. Le classement
+## 8. Le classement
 
-### 7.1 Modèle
+### 8.1 Modèle
+
+En KV, une entrée par salon et par niveau :
 
 ```
-Leaderboard {
-  version : entier
-  levels  : { [clé de niveau] : Entry[] }
-}
+clé   : room:<salon>:level:<clé de niveau>
+valeur: Entry[]        // les meilleurs, triés par coups croissants
 
 Entry {
-  pseudo  : texte
-  moves   : entier          // nombre de coups
-  proof   : liste de coups  // conservée, pour pouvoir la propager
-  at      : horodatage      // départage les ex aequo
+  pseudo : texte
+  moves  : entier
+  at     : horodatage   // départage les ex aequo
 }
 ```
 
-Stocké localement, sous une clé distincte de la progression solo, avec la même **lecture
-défensive** que celle du §12.3 des règles : version inconnue ou format inattendu repart d'un
-classement vide, entrée aberrante écartée sans jeter les autres.
+Un seul score par couple (pseudo, niveau) : **le meilleur gagne**, à égalité le plus ancien.
+Seules les `N` premières entrées sont conservées `[À CONFIRMER]`.
 
-### 7.2 Fusion
+Le client garde une **copie locale** du dernier classement reçu, avec la même lecture défensive
+que la progression solo (§12.3 des règles) : l'écran affiche toujours quelque chose, même hors
+ligne, et se met à jour dès que l'API répond.
 
-Pour chaque couple (niveau, pseudo), **le meilleur score gagne**. À égalité, le plus ancien —
-celui qui l'a trouvé le premier. La fusion est ainsi commutative, associative et idempotente :
-ouvrir les liens dans n'importe quel ordre, plusieurs fois, donne le même tableau.
-
-### 7.3 Écran
+### 8.2 Écran
 
 Un bouton **« Classement »** sur l'accueil ouvre un tableau à quatre colonnes :
 
-| Niveau | Or | Bronze | Cuivre |
+| Niveau | Or | Argent | Bronze |
 |---|---|---|---|
 | facile-003 | Sébastien — 8 | Marie — 9 | Paul — 11 |
 | défi 7f2a91c4 | Marie — 12 | Sébastien — 13 | — |
 
-- **Colonne 1** : la clé du niveau — son identifiant pour un niveau de campagne, son empreinte
-  courte pour un puzzle reçu par lien.
-- **Colonnes 2 à 4** : le podium, pseudo et nombre de coups.
-- Le joueur local est mis en évidence sur sa ligne.
-- Une place vide affiche un tiret plutôt que de disparaître.
-- Un niveau sans aucun score n'apparaît pas.
-
-`[À CONFIRMER]` **Le podium habituel est or / argent / bronze.** L'énoncé demandait
-or / bronze / cuivre ; c'est retenu tel quel ici, mais la substitution de l'argent par le cuivre
-surprendra, et le cuivre se distingue mal du bronze à l'écran. À trancher.
+- **Colonne 1** : la clé du niveau — son identifiant pour un niveau de campagne, l'empreinte
+  courte du puzzle pour un défi.
+- **Colonnes 2 à 4** : le podium, pseudo et nombre de coups. Or, argent, bronze — le cuivre
+  d'abord envisagé se distingue trop mal du bronze à l'écran.
+- Le joueur local est mis en évidence sur sa ligne ; une place vide affiche un tiret ; un niveau
+  sans score n'apparaît pas.
 
 ---
 
-## 8. Cas limites
+## 9. Robustesse
+
+Le réseau tombe, le Worker peut être indisponible, le joueur peut être dans le métro. **Rien de
+tout cela ne doit gêner la partie en cours.**
+
+- Une soumission qui échoue est **mise en file localement** et retentée à la prochaine ouverture.
+  Le joueur voit son score, marqué « en attente d'envoi ».
+- L'écran de classement affiche la copie locale, avec la date de dernière mise à jour, plutôt
+  qu'une erreur.
+- Le jeu reste entièrement jouable sans l'API. C'est un ajout, pas une dépendance.
+
+---
+
+## 10. Abus
+
+Une route d'écriture publique se fait spammer un jour ou l'autre. Sans authentification, on
+limite les dégâts plutôt que de prétendre les empêcher :
+
+- **rejeu obligatoire** — un score sans partie valide n'entre jamais ;
+- **plafond de taille** sur la charge utile ;
+- **limitation de débit** par adresse, via le mécanisme intégré de Cloudflare ;
+- **cloisonnement par salon** — l'identifiant n'étant pas devinable, il faut le lien pour écrire ;
+- **plafond d'entrées par salon**, pour qu'un salon ne puisse pas grossir indéfiniment.
+
+`[À CONFIRMER]` Faut-il un moyen d'effacer une entrée ou un salon ? Sans compte, seul un secret
+d'administration côté Worker le permettrait.
+
+---
+
+## 11. Données personnelles
+
+Ce que le backend change, et qu'il faut assumer : **des données quittent désormais l'appareil**.
+Un pseudo choisi, un nombre de coups, une liste de coups, un horodatage. Ni adresse, ni compte,
+ni traceur, ni identifiant publicitaire — mais ce n'est plus « rien ne sort ».
+
+Deux conséquences : le stockage doit rester **minimal** (pas d'adresse IP conservée au-delà de la
+limitation de débit), et une phrase dans l'interface doit le dire au moment où le joueur saisit
+son pseudo, plutôt que dans une page que personne ne lit.
+
+---
+
+## 12. Cas limites
 
 | Cas | Comportement |
 |---|---|
+| API injoignable | Score mis en file, classement affiché depuis la copie locale |
 | Lien tronqué ou corrompu | Message clair, retour à l'accueil. Jamais d'écran blanc |
-| Lien d'une version de format inconnue | Refus explicite, avec invitation à recharger le jeu |
-| Puzzle déjà terminé par le joueur | On peut rejouer ; seul un meilleur score remplace l'ancien |
-| Le joueur abandonne un défi | Rien n'est publié ; le défi reste ouvert |
-| Deux pseudos identiques dans un groupe | Traités comme une seule personne. `[À CONFIRMER]` — un suffixe court tiré au hasard à la création du pseudo lèverait l'ambiguïté |
-| `navigator.share` absent (ordinateur de bureau) | Repli sur la copie dans le presse-papiers |
-| Stockage local refusé | Le défi reste jouable ; le classement n'est simplement pas retenu |
+| Format de lien inconnu | Refus explicite, invitation à recharger le jeu |
+| Puzzle déjà terminé | On peut rejouer ; seul un meilleur score remplace l'ancien |
+| Défi abandonné | Rien n'est soumis |
+| Deux pseudos identiques dans un salon | Traités comme une seule personne. `[À CONFIRMER]` — un suffixe court tiré au hasard lèverait l'ambiguïté |
+| `navigator.share` absent | Repli sur la copie dans le presse-papiers |
+| Stockage local refusé | Le défi reste jouable ; le pseudo est redemandé à chaque fois |
 
 ---
 
-## 9. Périmètre
+## 13. Périmètre
 
-**Dedans** : lien de défi, capture du pseudo, vérification par rejeu, classement local fusionné,
-écran de classement, partage natif.
+**Dedans** : lien de défi, salons, pseudo, soumission vérifiée par rejeu, classement par niveau,
+écran de classement, partage natif, file d'attente hors ligne.
 
-**Dehors** : classement mondial, comptes, temps réel, jeu simultané, notifications, modération
-des pseudos, amitiés persistantes. Tout cela suppose l'option B et se décidera séparément.
+**Dehors** : comptes, temps réel, jeu simultané, notifications, modération, classement mondial,
+amitiés persistantes.
 
 ---
 
-## 10. Décisions à trancher
+## 14. Décisions
+
+### 14.1 Actées
+
+| # | Question | Réf. | Décision |
+|---|---|---|---|
+| D1 | Classement porté par les liens ou par un serveur ? | §2 | **Un serveur.** Un classement qui n'avance pas au rafraîchissement n'est pas un classement |
+| D2 | GitHub peut-il héberger le backend ? | §2 | **Non.** Pages est statique, les Actions exigeraient un jeton public. GitHub reste l'hébergeur du site |
+| D3 | Podium | §8.2 | **Or, argent, bronze** |
+| D4 | Contenu du lien | §5 | Le puzzle lui-même et le salon. Ni graine, ni scores |
+| D5 | Confiance dans les scores | §6 | Aucune : rejeu obligatoire côté serveur |
+| D6 | Le jeu dépend-il de l'API ? | §9 | Non. Le solo reste entièrement jouable sans réseau |
+
+### 14.2 Ouvertes
 
 | # | Question | Réf. | Proposition |
 |---|---|---|---|
-| Q1 | Option de transport du classement | §2 | **A** — sans serveur, le classement voyage dans les liens |
-| Q2 | Podium or / bronze / cuivre, ou or / argent / bronze ? | §7.3 | À trancher — l'argent est plus lisible que le cuivre |
-| Q3 | Pseudo demandé à l'arrivée ou à la victoire ? | §6 | À l'arrivée, comme demandé |
-| Q4 | Plafonds `N` entrées et `M` niveaux par lien | §4.3 | À calibrer sur la taille réelle des liens |
-| Q5 | Suffixe aléatoire sur le pseudo pour lever les homonymes ? | §8 | Oui, discret, affiché seulement en cas de collision |
-| Q6 | Un défi peut-il porter sur un niveau de campagne, ou seulement sur un puzzle généré ? | §4.1 | Les deux ; la clé diffère, le reste est identique |
+| Q1 | Cloudflare Workers + KV, ou un autre hébergeur ? | §3 | Workers + KV |
+| Q2 | KV ou D1 ? | §3 | KV, sauf besoin de classement transversal |
+| Q3 | Longueur de l'identifiant de salon | §4.1 | 10 à 12 caractères |
+| Q4 | Nombre d'entrées conservées par niveau | §8.1 | À calibrer |
+| Q5 | Effacement d'une entrée ou d'un salon | §10 | À définir |
+| Q6 | Pseudo demandé à l'arrivée ou à la victoire ? | §7 | À l'arrivée |
+| Q7 | Un défi peut-il porter sur un niveau de campagne ? | §5 | Oui, seule la clé diffère |
