@@ -19,9 +19,11 @@ Caractéristiques du jeu :
 - **Aucune limite de temps ni de nombre de coups** (par défaut).
 - **Difficulté par blocage** : un mauvais enchaînement mène à une position insoluble, d'où la
   nécessité d'un système d'annulation (*undo*) et d'un garde-fou de détection de blocage.
-- **Spécificité de cette variante : les bouteilles ont des capacités différentes.** C'est le
-  point qui distingue le plus ce jeu d'un Water Sort classique (où toutes les tubes ont 4 unités)
-  et qui conditionne toute la conception : génération de niveaux, solveur, rendu.
+- **Spécificité de cette variante : une grande bouteille unique.** Le plateau se compose de
+  `N` **bouteilles standard** de capacité **uniforme** `C` (`C = 4` sur les captures de
+  référence) et d'**une seule grande bouteille**, la colonne de gauche, de capacité `K > C`.
+  Les silhouettes des bouteilles standard varient (habillage graphique) mais **pas** leur
+  capacité : seul le nombre de couches compte.
 
 ---
 
@@ -52,19 +54,26 @@ Level {
 
 Bottle {
   id         : entier                    // stable, sert de référence dans l'historique
-  capacity   : entier > 0                // capacité en unités — HÉTÉROGÈNE
+  capacity   : entier > 0                // C pour les standard, K pour l'unique grande
   content    : liste de Color            // du fond vers le goulot, len <= capacity
 }
 ```
+
+Le modèle porte volontairement `capacity` **par bouteille** plutôt qu'une constante globale :
+c'est la structure la plus simple qui décrit à la fois les standard et la grande, et elle
+n'interdit pas d'introduire plus tard d'autres tailles. La contrainte « toutes les standard
+partagent la même capacité » est une règle de **validité de niveau** (§6.1), pas une contrainte
+du modèle.
 
 Invariants permanents (à vérifier par assertion en dev) :
 
 - **I1** — `0 <= len(content) <= capacity` pour toute bouteille.
 - **I2** — Pour chaque couleur `c` : `total(c)` (nombre d'unités de `c` sur le plateau) est
   **constant** tout au long de la partie. Aucune unité n'est créée ni détruite.
-- **I3** — Pour chaque couleur `c`, il existe au moins une bouteille de capacité
-  `>= total(c)`, sinon le niveau est insoluble par construction. *(Conséquence directe des
-  capacités hétérogènes ; voir §6.)*
+- **I3** — Pour chaque couleur `c`, il existe au moins une bouteille de capacité `>= total(c)`,
+  sinon le niveau est insoluble par construction. Concrètement : chaque couleur a soit
+  `total(c) = C` (elle finit dans une bouteille standard), soit `total(c) <= K` pour **au plus
+  une** couleur, celle destinée à la grande bouteille. Voir §6.1.
 
 ---
 
@@ -141,10 +150,10 @@ toutes ses unités se trouvent dans une seule et même bouteille.
 
 Formulation équivalente et plus simple à tester : **chaque bouteille est vide ou monochrome**.
 
-> ⚠️ Ne **pas** exiger que chaque bouteille pleine soit la condition de victoire. Avec des
-> capacités hétérogènes, une couleur peut légitimement terminer dans une bouteille plus grande
-> qu'elle sans la remplir. La condition « monochrome » est la bonne ; la condition « pleine »
-> ne sert qu'à décider du bouchon (§4).
+> ⚠️ Ne **pas** exiger que chaque bouteille pleine soit la condition de victoire. Une couleur
+> peut légitimement terminer dans la grande bouteille sans la remplir (si `total(c) < K`), ou
+> dans une standard partiellement remplie. La condition « monochrome » est la bonne ; la
+> condition « pleine » ne sert qu'à décider du bouchon (§4).
 
 ### 5.2 Blocage (défaite douce)
 
@@ -166,9 +175,11 @@ proposition : le faire **hors ligne** à la génération, et à l'exécution seu
 
 Un niveau est **valide** si :
 
-- **V1** — Pour chaque couleur `c` : il existe une bouteille de capacité `>= total(c)`
-  (invariant I3). Le cas le plus simple, et recommandé par défaut : `total(c)` est exactement
-  la capacité d'une des bouteilles.
+- **V1** — Structure du plateau : `N` bouteilles de capacité `C` et **une** de capacité `K > C`.
+  Pour chaque couleur `c` : `total(c) = C`, à l'exception d'au plus une couleur — celle logée
+  dans la grande bouteille — pour laquelle `total(c) <= K`. Recommandé par défaut :
+  `total(c) = K` exactement, pour que la grande bouteille se bouche elle aussi en fin de partie.
+  Corollaire : le nombre d'unités à trier vaut `(nb_couleurs - 1) * C + K`.
 - **V2** — Il existe au moins une marge de manœuvre : somme des espaces libres initiaux `>= 1`,
   et en pratique une ou deux bouteilles vides (ou largement entamées) pour rendre le niveau
   jouable.
@@ -184,7 +195,7 @@ Un niveau est **valide** si :
 | Nombre de couleurs | Principal facteur de complexité combinatoire. |
 | Nombre de bouteilles | Plus il y en a par rapport aux couleurs, plus c'est facile. |
 | Nombre de bouteilles vides / espace libre total | Le levier le plus sensible : 2 vides = confortable, 1 vide = difficile, 0 vide = très contraint. |
-| Dispersion des capacités | Capacités très inégales = plus dur à planifier (versements partiels forcés). |
+| Rapport `K / C` | Plus la grande bouteille est grande, plus la couleur qu'elle accueille est éparpillée sur le plateau et longue à rassembler. |
 | Fragmentation initiale | Nombre de blocs par couleur : plus il y a de blocs éparpillés, plus c'est long. |
 | Couleurs proches visuellement | À **éviter** — c'est de la difficulté perçue comme injuste, et un problème d'accessibilité (§8). |
 
@@ -207,16 +218,19 @@ doit être filtré a posteriori.
   "id": "level-0042",
   "name": "Harder than you think",
   "colors": ["orange", "green", "blue", "dark", "white"],
+  "standardCapacity": 4,
   "bottles": [
-    { "id": 0,  "capacity": 12, "content": ["orange", "orange", "orange"] },
-    { "id": 1,  "capacity": 4,  "content": ["green", "dark", "dark", "dark"] },
-    { "id": 2,  "capacity": 3,  "content": [] }
+    { "id": 0, "capacity": 12, "content": ["orange", "orange", "orange"] },
+    { "id": 1, "capacity": 4,  "content": ["green", "dark", "dark", "dark"] },
+    { "id": 2, "capacity": 4,  "content": [] }
   ],
   "par": 38
 }
 ```
 
 - `content` est listé **du fond vers le goulot**.
+- `capacity` reste explicite sur chaque bouteille ; `standardCapacity` sert au validateur, qui
+  vérifie qu'exactement une bouteille s'en écarte (la grande, §6.1).
 - `par` = longueur de la solution optimale trouvée par le solveur, sert au barème d'étoiles.
 
 ---
@@ -282,10 +296,11 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
   grands.
 - **Heuristique admissible** proposée : `sum(nb_blocs(c) - 1)` sur toutes les couleurs — chaque
   bloc surnuméraire d'une couleur exige au minimum un versement.
-- **Canonisation d'état** indispensable : deux bouteilles **de même capacité** et de même
-  contenu sont interchangeables → trier les bouteilles par `(capacity, content)` avant de
-  hacher. ⚠️ Ne jamais permuter des bouteilles de capacités différentes : contrairement au Water
-  Sort classique, elles **ne sont pas** interchangeables ici.
+- **Canonisation d'état** indispensable : deux bouteilles de même capacité et de même contenu
+  sont interchangeables → trier les bouteilles par `(capacity, content)` avant de hacher. Les
+  bouteilles standard partageant toutes la capacité `C`, elles sont permutables entre elles ;
+  la grande bouteille, seule de sa capacité, reste naturellement à sa place dans ce tri. Trier
+  sur `(capacity, content)` et non sur `content` seul suffit donc à traiter les deux cas.
 - Limites de temps / nœuds explorés, avec repli sur une solution non optimale si dépassement.
 
 ---
@@ -303,7 +318,9 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
 | Q7 | *Undo* illimité ou limité ? | §7.2 | Illimité en v1 |
 | Q8 | Capacité et coût de la bouteille ajoutée | §7.3 | À définir |
 | Q9 | Barème d'étoiles / progression / méta-jeu | — | Hors périmètre v1 |
-| Q10 | La très grande bouteille (colonne) a-t-elle une règle propre, ou est-ce une bouteille ordinaire de grande capacité ? | §2.1 | Bouteille ordinaire |
+| Q10 | Valeur de `K` (capacité de la grande bouteille) et de `C` | §6.1 | `C = 4` ; `K` à mesurer, ~10–12 sur les captures |
+| Q11 | La grande bouteille suit-elle exactement les mêmes règles (source **et** destination, bouchon en fin) ? | §2.1, §4 | Oui — bouteille ordinaire, seule sa capacité diffère |
+| Q12 | `K` est-il constant sur tous les niveaux, ou un paramètre de difficulté ? | §6.2 | Paramètre de niveau |
 
 ---
 
