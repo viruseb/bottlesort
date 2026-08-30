@@ -287,6 +287,8 @@ Un niveau est **valide** si :
 | Remplissage initial du collecteur | 0 unité = 4 lots à constituer (dur) ; 12 unités = 1 seul lot (facile). Levier le plus lisible pour la courbe de progression. |
 | Part de la couleur de collecte | Elle occupe `K` unités, soit bien plus qu'une couleur ordinaire : elle sature le plateau au départ et le libère progressivement. |
 | Fragmentation initiale | Nombre de blocs par couleur : plus il y a de blocs éparpillés, plus c'est long. |
+| **Fragmentation de la couleur de collecte** | Le levier le plus puissant, voir §6.3.3. Quatre blocs de `C` posés à plat = niveau mou ; des unités isolées coiffant d'autres couleurs = niveau tendu. |
+| **Enfouissement** | Profondeur moyenne à laquelle une couleur est enterrée sous d'autres. C'est ce qui crée les dépendances entre couleurs. |
 | Couleurs proches visuellement | À **éviter** — c'est de la difficulté perçue comme injuste, et un problème d'accessibilité (§8). |
 
 ### 6.3 Génération
@@ -303,10 +305,81 @@ Méthode retenue : **génération par marche arrière**.
      les rendre à une bouteille standard. Le cas `q = C` vers une bouteille vide est l'inverse
      du transfert automatique ; il faut ensuite continuer à disperser ces unités, faute de quoi
      V1c serait violée.
-3. Vérifier V1–V4 ; relancer le solveur pour obtenir la longueur optimale.
+3. Vérifier V1–V4, puis **mesurer la qualité** du niveau obtenu (§6.3.3) et l'accepter ou le
+   rejeter.
 
 Ce procédé garantit la solvabilité par construction, contrairement à un tirage aléatoire qui
-doit être filtré a posteriori.
+devrait être filtré a posteriori — avec un taux de rejet rédhibitoire.
+
+### 6.3.1 Deux pièges de la marche arrière
+
+Ces deux points font échouer la plupart des générateurs à rebours. Ils sont à traiter dès la
+première version, pas après coup.
+
+**Le coup inverse n'est pas la symétrie du coup direct.** Un versement direct vide *tout* le
+bloc de tête de la source (sauf troncature par la place disponible en destination, §3.2). Si un
+pas arrière rend `q` unités à une bouteille `A` dont le sommet porte déjà cette couleur, le bloc
+de tête d'`A` devient plus grand que `q` : le coup direct correspondant en verserait davantage
+et ne reproduirait pas l'état d'où l'on vient. La parade n'est pas un raisonnement symbolique
+mais une **vérification effective** : à chaque pas arrière, reconstruire l'état antérieur, puis
+contrôler que le coup direct y est légal **et** redonne exactement l'état suivant. Tout candidat
+qui échoue est rejeté.
+
+**Bouchon et transfert automatique sont des propriétés dérivées, jamais stockées dans l'état.**
+La marche arrière traverse en permanence des états qui n'existent pas en jeu : défaire un
+transfert automatique consiste précisément à créer une bouteille standard pleine de la couleur
+de collecte, qui en marche avant se viderait aussitôt. Deux conséquences :
+
+- ces états sont **interdits en sortie** : il faut continuer à disperser ces unités avant de
+  s'arrêter, sans quoi V1c est violée ;
+- le bouchon doit être **recalculé depuis le contenu** à chaque évaluation. S'il était mémorisé
+  dans l'état, une bouteille bouchée par la marche arrière deviendrait une source illégale en
+  marche avant, et le niveau produit serait insoluble tout en paraissant valide.
+
+### 6.3.2 Le nombre de coups mélangés n'est pas la difficulté
+
+La longueur de la marche arrière est un **majorant** de la longueur de solution, pas une mesure.
+Un mélange de 40 pas peut produire un puzzle qui se dénoue en 12 : le chemin parcouru est *une*
+solution, rarement la plus courte. Un générateur sans solveur produit donc des niveaux de
+difficulté **inconnue**.
+
+La marche arrière seule reste utile comme échafaudage (avoir de quoi remplir un écran pendant le
+développement de l'interface), mais **aucun niveau publié ne se passe du solveur**.
+
+### 6.3.3 Critères de qualité d'un niveau
+
+La longueur optimale ne suffit pas : un niveau long peut n'être qu'une suite de coups forcés,
+donc ennuyeux. Quatre mesures, toutes calculables avec le solveur :
+
+| Critère | Mesure | Cible |
+|---|---|---|
+| **Profondeur** | Longueur de la solution optimale (`par`). | Au-dessus du seuil de difficulté (V4), et **court** en v1 : sans annulation (§7.2), un niveau long transforme l'erreur en punition. |
+| **Largeur du chemin** | À chaque position de la solution, part des coups légaux qui préservent la solvabilité. | Ni 1 coup correct sur 20 (punitif), ni tous corrects (sans enjeu). C'est l'indicateur qui sépare un puzzle d'une corvée. |
+| **Échec du glouton** | Faire jouer un agent qui choisit toujours le coup rassemblant le plus d'unités. | Le glouton doit **échouer** là où le solveur réussit. C'est la signature d'un niveau mémorable : la stratégie évidente mène dans le mur. |
+| **Congestion** | Espace libre disponible au fil de la solution. | Doit passer par un creux : le moment où le plateau est le plus saturé est le cœur du niveau. |
+
+### 6.3.4 Où se joue réellement l'intérêt : la couleur de collecte
+
+Le collecteur **n'apporte aucune profondeur de décision**. Y verser la couleur de collecte est
+toujours au moins aussi bon que n'importe quel autre coup (c'est un puits monotone, §9) : il n'y
+a donc jamais de dilemme à son sujet, et un solveur peut même jouer ce coup d'office.
+
+Ce que le collecteur apporte est de la **congestion** : ses `K = 16` unités saturent le plateau
+au départ, enterrent les autres couleurs, et libèrent des bouteilles au compte-gouttes. L'intérêt
+d'un niveau ne se joue donc pas *sur* le collecteur, mais sur **la façon dont sa couleur est
+répartie et sur ce qu'elle recouvre**.
+
+D'où la règle de génération la plus importante :
+
+> Ne pas piloter la difficulté par le nombre de pas de mélange, mais par la **dispersion de la
+> couleur de collecte**. Quatre blocs de `C` posés à plat au fond de quatre bouteilles donnent un
+> niveau mou — quatre transferts automatiques immédiats, quatre bouteilles libérées, plus aucune
+> tension. Les mêmes 16 unités éparpillées en unités isolées **coiffant** d'autres couleurs
+> obligent à reconstituer chaque lot en manœuvrant, et c'est là que naît le puzzle.
+
+Concrètement, le générateur pilote deux paramètres corrélés à la difficulté : le **nombre de
+blocs** de la couleur de collecte (de 4 à 16) et la **part de ces blocs situés en sommet de
+bouteille** (un bloc au sommet est immédiatement mobilisable, un bloc enterré ne l'est pas).
 
 ### 6.4 Format de niveau (proposition)
 
