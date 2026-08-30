@@ -6,6 +6,7 @@
 > - v0.1 : classement porté par les liens, sans serveur. **Abandonné** (§2).
 > - v0.2 : Cloudflare Workers + KV. **Abandonné** — KV est le mauvais outil (§3.1), et le compte
 >   AWS déjà en place enlève l'argument principal en faveur de Cloudflare.
+> - v0.3 : AWS. Cette version fixe le dimensionnement, la région et les règles de pseudo.
 
 ---
 
@@ -98,6 +99,23 @@ consomme quelques dizaines par semaine.
 `[À CONFIRMER]` Vérifier les offres en vigueur au moment de l'implémentation, elles bougent. Et
 **poser une alerte de facturation** : c'est bon marché tant que personne n'abuse (§10).
 
+### 3.4 Dimensionnement
+
+Cible : **une dizaine de joueurs simultanés**. Tout est calibré là-dessus, avec des plafonds durs
+plutôt que de l'élasticité — sur un projet de loisir, une facture surprise est un risque plus
+réel qu'une saturation.
+
+| Réglage | Valeur | Raison |
+|---|---|---|
+| Concurrence réservée de la Lambda | 10 | Correspond à la cible et **plafonne la facture** quoi qu'il arrive |
+| Mémoire de la Lambda | 256 Mo `[À CONFIRMER]` | Le rejeu d'une partie est trivial ; à mesurer |
+| Facturation DynamoDB | **Provisionnée**, 5 unités en lecture et en écriture | Bien dans l'offre gratuite permanente (25 + 25) et, surtout, **plafond dur**. Le mode à la demande n'a aucun plafond : un emballement se paie |
+| Limitation par adresse | 30 requêtes par minute | Confortable pour un humain, étroit pour un script |
+| Taille maximale d'une soumission | 4 Ko | Une partie de 200 coups tient largement dedans |
+
+Une dizaine de joueurs produit quelques écritures par minute au pic. On est deux ordres de
+grandeur sous les plafonds : ils ne servent qu'à contenir l'anormal.
+
 ---
 
 ## 4. Architecture
@@ -125,12 +143,19 @@ deviner `[À CONFIRMER]`.
 
 ### 4.2 Déploiement
 
+**Région : `eu-west-3` (Paris).** Les données restent en Europe, au plus près des joueurs.
+
+**Infrastructure décrite en CloudFormation**, dans un unique gabarit versionné avec le reste :
+la table, la fonction, son rôle, sa Function URL et la concurrence réservée.
+
 Depuis le workflow GitHub Actions existant, via **OIDC** : GitHub s'authentifie auprès d'AWS par
 jeton éphémère. **Aucune clé d'accès longue durée ne doit être stockée en secret de dépôt** — une
 clé qui fuite reste valable jusqu'à révocation, un jeton OIDC expire en quelques minutes.
 
-`[À CONFIRMER]` Outil de description de l'infrastructure : SAM, CDK, Terraform ou simple appel
-d'API. Le montage est assez petit pour que le plus léger suffise.
+Une contrainte propre à CloudFormation nu, à prévoir plutôt qu'à découvrir : il ne sait pas
+téléverser le code d'une fonction. Le workflow doit donc **construire l'archive, la déposer dans
+un seau S3 dédié, puis mettre la pile à jour** en pointant sur cet objet. C'est l'étape que SAM
+automatiserait ; en CloudFormation nu, elle s'écrit à la main une fois.
 
 ---
 
@@ -189,7 +214,30 @@ milliseconde, et le code qui valide est **exactement** celui qui joue.
 - 2 à 16 caractères, espaces autorisés. Aucun compte, aucune adresse, aucun mot de passe.
 - Un pseudo vide bascule sur un nom généré plutôt que de bloquer.
 
-### 7.1 Le pseudo est une donnée hostile
+### 7.1 Homonymes, et ce qu'ils impliquent
+
+Deux « Seb » dans un salon sont deux personnes. Le premier arrivé garde son pseudo tel quel ; les
+suivants reçoivent le plus petit entier libre — **Seb 2**, **Seb 3**. Le suffixe est attribué par
+le serveur, qui seul connaît le salon, et **renvoyé au client**, qui affiche et mémorise le
+pseudo effectif. Sans ce retour, le joueur se croirait « Seb » alors que le classement afficherait
+« Seb 2 ».
+
+**Cette règle a une conséquence qu'il faut assumer : elle exige un identifiant d'appareil.** Sans
+lui, le serveur ne peut pas distinguer « le même Seb qui améliore son score » de « un autre Seb
+qui arrive » — il ne verrait qu'un pseudo identique. On tire donc à la première utilisation un
+**identifiant local, aléatoire et opaque**, conservé en stockage local et envoyé avec chaque
+soumission.
+
+Ce n'est pas un compte et cela n'identifie personne : ni adresse, ni courriel, ni mot de passe,
+et il ne sert qu'à recoller un joueur à ses propres scores. Mais c'est un identifiant persistant,
+et le dire est plus honnête que de prétendre qu'il n'y en a aucun.
+
+Deux effets de bord, mineurs mais réels : un joueur qui efface les données de son navigateur
+repart avec un nouvel identifiant et deviendra « Seb 2 » à côté de son ancien « Seb » ; et le
+même appareil sur deux salons peut porter des suffixes différents, ce qui est correct — le
+suffixe appartient au salon, pas à la personne.
+
+### 7.2 Le pseudo est une donnée hostile
 
 Il arrive **par le réseau, écrit par quelqu'un d'autre**. Des deux côtés :
 
@@ -210,21 +258,32 @@ client protège l'affichage, et aucun des deux ne doit dépendre de l'autre.
 Une ligne DynamoDB par score :
 
 ```
-PK   : room#<salon>#level#<clé de niveau>
-SK   : <pseudo>
-moves: entier
-at   : horodatage        // départage les ex aequo
-ttl  : expiration        // ménage automatique des vieux salons
+PK     : room#<salon>#level#<clé de niveau>
+SK     : <identifiant d'appareil>
+pseudo : texte                  // pseudo effectif, suffixe compris
+moves  : entier
+at     : horodatage             // départage les ex aequo
 ```
 
-Une seule requête sur la clé de partition rend tous les scores d'un niveau ; le tri et la coupe
-au podium se font en mémoire, les listes étant courtes.
+La clé de tri est **l'identifiant d'appareil** et non le pseudo : c'est lui qui identifie un
+joueur (§7.1), et c'est ce qui permet à quelqu'un de changer de pseudo sans se dédoubler.
 
-Un seul score par couple (pseudo, niveau) : **le meilleur gagne**, garanti par l'écriture
+Une seule requête sur la clé de partition rend tous les scores d'un niveau ; le tri et la coupe
+se font en mémoire, les listes étant courtes.
+
+Un seul score par joueur et par niveau : **le meilleur gagne**, garanti par l'écriture
 conditionnelle (§3.1) plutôt que par une lecture suivie d'une écriture.
 
-Le champ `ttl` laisse DynamoDB effacer seul les salons oubliés — pas de tâche de ménage à
-écrire, pas de stockage qui gonfle indéfiniment. `[À CONFIRMER]` — durée de rétention.
+**Seules les trois meilleures entrées** sont exposées : le classement est un podium, pas un
+annuaire. Les autres scores restent stockés — ils coûtent quelques octets et permettront
+d'élargir l'affichage plus tard sans avoir rien perdu.
+
+**Aucune expiration, aucun effacement.** Décision assumée : pas de `ttl`, pas de route de
+suppression. À l'échelle visée, le stockage est négligeable — une entrée pèse une centaine
+d'octets, l'offre gratuite en tient des millions. Deux conséquences à connaître : un pseudo
+déplacé reste dans le salon pour toujours, et il n'existe aucun moyen de retirer une entrée si
+quelqu'un le demandait. Le jour où ce serait nécessaire, cela s'ajoute — un secret
+d'administration côté Lambda suffirait.
 
 Le client garde une **copie locale** du dernier classement reçu, avec la même lecture défensive
 que la progression solo (§12.3 des règles) : l'écran affiche toujours quelque chose, même hors
@@ -287,13 +346,18 @@ Ce que le backend change, et qu'il faut assumer : **des données quittent désor
 Un pseudo choisi, un nombre de coups, une liste de coups, un horodatage. Ni adresse, ni compte,
 ni traceur, ni identifiant publicitaire — mais ce n'est plus « rien ne sort ».
 
-Trois conséquences : le stockage reste **minimal** — aucune adresse IP conservée au-delà de la
-fenêtre de limitation de débit, qui expire d'elle-même ; les données ont une **durée de vie**
-(§8.1) plutôt que d'être gardées indéfiniment ; et une phrase dans l'interface le dit au moment
-où le joueur saisit son pseudo, plutôt que dans une page que personne ne lit.
+Il s'y ajoute un **identifiant d'appareil** aléatoire (§7.1), sans lequel les homonymes ne
+peuvent pas être distingués.
 
-`[À CONFIRMER]` Région AWS — une région européenne garde les données au plus près des joueurs et
-simplifie la question.
+Trois conséquences : le stockage reste **minimal** — aucune adresse IP conservée au-delà de la
+fenêtre de limitation de débit, qui expire d'elle-même ; les données sont en **`eu-west-3`**,
+donc en Europe ; et une phrase dans l'interface le dit au moment où le joueur saisit son pseudo,
+plutôt que dans une page que personne ne lit.
+
+**Ces données sont conservées sans limite de durée et sans moyen de les retirer** (§8.1). C'est
+un choix délibéré, cohérent avec un jeu entre amis où le pseudo est inventé et où rien ne permet
+de remonter à une personne. Il faudrait le revoir si le jeu s'ouvrait au-delà d'un cercle
+d'amis.
 
 ---
 
@@ -306,7 +370,8 @@ simplifie la question.
 | Format de lien inconnu | Refus explicite, invitation à recharger le jeu |
 | Puzzle déjà terminé | On peut rejouer ; seul un meilleur score remplace l'ancien |
 | Défi abandonné | Rien n'est soumis |
-| Deux pseudos identiques dans un salon | Traités comme une seule personne. `[À CONFIRMER]` — un suffixe court tiré au hasard lèverait l'ambiguïté |
+| Deux pseudos identiques dans un salon | Le premier garde son pseudo, les suivants deviennent « Seb 2 », « Seb 3 » (§7.1) |
+| Données du navigateur effacées | Nouvel identifiant d'appareil : le joueur repart à zéro et devient un homonyme de lui-même |
 | `navigator.share` absent | Repli sur la copie dans le presse-papiers |
 | Stockage local refusé | Le défi reste jouable ; le pseudo est redemandé à chaque fois |
 
@@ -329,26 +394,29 @@ amitiés persistantes.
 | # | Question | Réf. | Décision |
 |---|---|---|---|
 | D1 | Classement porté par les liens ou par un serveur ? | §2 | **Un serveur.** Un classement qui n'avance pas au rafraîchissement n'est pas un classement |
-| D2 | GitHub peut-il héberger le backend ? | §2 | **Non.** Pages est statique, les Actions exigeraient un jeton public. GitHub reste l'hébergeur du site |
-| D7 | Hébergeur du backend | §3 | **AWS** — Lambda avec Function URL, sans API Gateway, plus DynamoDB |
-| D8 | Magasin de données | §3.1 | **DynamoDB avec écriture conditionnelle.** Un magasin clé-valeur nu perd silencieusement un score en cas d'écriture simultanée |
-| D9 | Authentification du déploiement | §4.2 | **OIDC**, jamais de clé d'accès longue durée en secret de dépôt |
+| D2 | GitHub peut-il héberger le backend ? | §2 | **Non.** Pages est statique, les Actions exigeraient un jeton public |
 | D3 | Podium | §8.2 | **Or, argent, bronze** |
 | D4 | Contenu du lien | §5 | Le puzzle lui-même et le salon. Ni graine, ni scores |
 | D5 | Confiance dans les scores | §6 | Aucune : rejeu obligatoire côté serveur |
 | D6 | Le jeu dépend-il de l'API ? | §9 | Non. Le solo reste entièrement jouable sans réseau |
+| D7 | Hébergeur du backend | §3 | **AWS** — Lambda avec Function URL, sans API Gateway, plus DynamoDB |
+| D8 | Magasin de données | §3.1 | **DynamoDB avec écriture conditionnelle.** Un magasin clé-valeur nu perd silencieusement un score en cas d'écriture simultanée |
+| D9 | Authentification du déploiement | §4.2 | **OIDC**, jamais de clé d'accès longue durée en secret de dépôt |
+| D10 | Région | §4.2 | **`eu-west-3`** (Paris) |
+| D11 | Description de l'infrastructure | §4.2 | **CloudFormation**, gabarit unique versionné. Le workflow construit l'archive, la dépose sur S3, puis met la pile à jour |
+| D12 | Dimensionnement | §3.4 | **Dix joueurs simultanés.** Concurrence réservée à 10, DynamoDB provisionnée à 5/5, 30 requêtes par minute et par adresse, 4 Ko par soumission |
+| D13 | Entrées exposées par niveau | §8.1 | **Les trois premières.** Les suivantes restent stockées |
+| D14 | Expiration et effacement | §8.1 | **Aucun des deux.** Ni `ttl`, ni route de suppression |
+| D15 | Pseudo demandé quand ? | §7 | À l'arrivée sur un lien de défi, avant de jouer |
+| D16 | Défi sur un niveau de campagne ? | §5 | **Oui**, seule la clé du classement diffère |
+| D17 | Homonymes | §7.1 | Suffixe entier : « Seb », « Seb 2 », « Seb 3 ». Exige un identifiant d'appareil |
 
 ### 14.2 Ouvertes
 
 | # | Question | Réf. | Proposition |
 |---|---|---|---|
-| Q1 | Région AWS | §11 | Une région européenne |
-| Q2 | Outil d'infrastructure : SAM, CDK, Terraform ou appel d'API direct ? | §4.2 | Le plus léger qui fasse l'affaire |
-| Q3 | Longueur de l'identifiant de salon | §4.1 | 10 à 12 caractères |
-| Q4 | Nombre d'entrées conservées par niveau | §8.1 | Le podium plus quelques suivants, à calibrer |
-| Q5 | Durée de rétention (`ttl`) d'un salon | §8.1 | À définir — quelques mois d'inactivité |
-| Q6 | Effacement d'une entrée ou d'un salon à la demande | §10 | Sans compte, exigerait un secret d'administration |
-| Q7 | Pseudo demandé à l'arrivée ou à la victoire ? | §7 | À l'arrivée, comme demandé |
-| Q8 | Un défi peut-il porter sur un niveau de campagne ? | §5 | Oui, seule la clé diffère |
-| Q9 | Suffixe aléatoire pour lever les homonymes dans un salon ? | §12 | Oui, affiché seulement en cas de collision |
-| Q10 | Seuils de limitation de débit et concurrence réservée | §10 | À calibrer, prudents au départ |
+| Q1 | Mémoire allouée à la Lambda | §3.4 | 256 Mo, à confirmer par la mesure |
+| Q2 | Offres gratuites en vigueur | §3.3 | À revérifier à l'implémentation, elles bougent |
+
+Aucune de ces deux questions ne bloque le démarrage : la première se tranche en mesurant, la
+seconde en lisant la grille tarifaire du jour.
