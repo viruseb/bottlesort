@@ -24,15 +24,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Etape de build a brancher ici des que l'application existe.
-      # Le site est servi depuis /bottlesort/ : le bundler devra etre
-      # configure avec cette base (base: '/bottlesort/' en Vite).
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: dist
 
       - id: deployment
         uses: actions/deploy-pages@v4

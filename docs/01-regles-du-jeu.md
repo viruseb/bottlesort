@@ -10,15 +10,21 @@
 Bottle Sort est un puzzle de tri de liquides colorés, de la famille des *Water Sort Puzzle* /
 *Ball Sort Puzzle*. Le plateau présente un ensemble de bouteilles contenant des couches de
 liquide de plusieurs couleurs, empilées dans le désordre. Le joueur transvase le contenu d'une
-bouteille vers une autre jusqu'à ce que chaque couleur soit regroupée dans une seule bouteille.
+bouteille vers une autre jusqu'à ce que chaque bouteille ne contienne plus qu'une seule couleur.
+
+**Une couleur occupe généralement plusieurs bouteilles.** Un plateau type comporte une trentaine
+de bouteilles pour quatre ou cinq couleurs : chaque couleur ordinaire remplit donc `m` bouteilles
+(typiquement 3 ou 4), et non une seule. C'est la lecture conforme aux captures de référence, où
+le plateau est occupé aux deux tiers.
 
 Caractéristiques du jeu :
 
 - **Aucun hasard en cours de partie.** L'état initial est fixé par le niveau ; tous les coups
   sont déterministes. C'est un puzzle d'information parfaite, pas un jeu de chance.
 - **Aucune limite de temps ni de nombre de coups** (par défaut).
-- **Difficulté par blocage** : un mauvais enchaînement mène à une position insoluble, d'où la
-  nécessité d'un système d'annulation (*undo*) et d'un garde-fou de détection de blocage.
+- **Difficulté par blocage** : un mauvais enchaînement mène à une position insoluble, d'où
+  l'importance du garde-fou de détection de blocage (§5.2), d'autant plus grande que la v1 se
+  joue sans annulation (§7.2).
 - **Spécificité de cette variante : le collecteur.** Le plateau se compose de `N` **bouteilles
   standard** de capacité **uniforme** `C = 4` et d'**un collecteur** unique — la colonne de
   gauche — de capacité `K = 4 x C = 16`. Les silhouettes des bouteilles standard varient
@@ -80,9 +86,10 @@ Invariants permanents (à vérifier par assertion en dev) :
 - **I1** — `0 <= len(content) <= capacity` pour toute bouteille.
 - **I2** — Pour chaque couleur `c` : `total(c)` (nombre d'unités de `c` sur le plateau) est
   **constant** tout au long de la partie. Aucune unité n'est créée ni détruite.
-- **I3** — Chaque couleur dispose d'un contenant capable de l'accueillir entièrement :
-  `total(c) = C` pour toute couleur ordinaire, `total(collectColor) = K` pour la couleur de
-  collecte. Voir §6.1.
+- **I3** — Chaque couleur dispose d'assez de contenants pour l'accueillir entièrement :
+  `total(c) = m_c * C` avec `m_c >= 1` bouteilles standard pour toute couleur ordinaire, et
+  `total(collectColor) = K` pour la couleur de collecte. Les totaux sont des **multiples de la
+  capacité** : à la fin, toute bouteille non vide est pleine. Voir §6.1.
 - **I4** — Le collecteur ne contient jamais que la couleur de collecte, et son remplissage est
   monotone croissant (aucun coup n'en retire d'unité).
 
@@ -217,17 +224,19 @@ seule entrée d'historique** indivisible.
 
 ### 5.1 Victoire
 
-La partie est gagnée quand **toute couleur est entièrement regroupée** : pour chaque couleur `c`,
-toutes ses unités se trouvent dans une seule et même bouteille.
+La partie est gagnée quand **toute bouteille est vide ou complétée** — c'est-à-dire pleine et
+monochrome, donc bouchée (§4). Le collecteur y compris : `total(collectColor) = K` garantit qu'il
+finit plein.
 
-Formulation équivalente et plus simple à tester : **chaque bouteille est vide ou monochrome**.
-Pour la couleur de collecte, cela revient à dire que le collecteur est plein et bouché (§4.3),
-puisque toutes ses unités doivent s'y trouver.
+Autrement dit : **le niveau est gagné quand tous les bouchons sont posés.** C'est la formulation
+la plus simple à tester, et c'est aussi le signal visuel que le joueur lit déjà à l'écran.
 
-> ⚠️ Ne **pas** exiger que chaque bouteille pleine soit la condition de victoire. Une couleur
-> peut légitimement terminer dans la grande bouteille sans la remplir (si `total(c) < K`), ou
-> dans une standard partiellement remplie. La condition « monochrome » est la bonne ; la
-> condition « pleine » ne sert qu'à décider du bouchon (§4).
+> ⚠️ « Chaque bouteille est vide ou **monochrome** » ne suffit **pas**. Une couleur occupant
+> plusieurs bouteilles (§1), cette condition plus faible accepterait une répartition dégénérée —
+> 4, 4, 4, 3 puis 1 unité dans cinq bouteilles distinctes : toutes monochromes, aucune mélangée,
+> mais la couleur reste éparpillée et deux bouteilles sont gaspillées. Exiger que chaque
+> bouteille non vide soit **pleine** force le regroupement complet. C'est possible sans exception
+> parce que tous les totaux sont des multiples de `C` (I3).
 
 ### 5.2 Blocage (défaite douce)
 
@@ -257,10 +266,15 @@ l'exécution uniquement si l'on ajoute plus tard un mode assistance.
 Un niveau est **valide** si :
 
 - **V1** — Structure du plateau : `N` bouteilles standard de capacité `C = 4` et **un**
-  collecteur de capacité `K = 16`. Pour chaque couleur ordinaire `total(c) = C` ; pour la
-  couleur de collecte `total(collectColor) = K` exactement — assez pour remplir le collecteur,
-  et pas davantage, faute de quoi le reliquat resterait orphelin dans une bouteille standard.
-  Corollaire : `(nb_couleurs - 1) * C + K` unités à trier.
+  collecteur de capacité `K = 16`. Pour chaque couleur ordinaire `total(c) = m_c * C` avec
+  `m_c >= 1` (typiquement 3 ou 4) ; pour la couleur de collecte `total(collectColor) = K`
+  exactement — assez pour remplir le collecteur, et pas davantage, faute de quoi le reliquat
+  resterait orphelin. Total à trier : `C * somme(m_c) + K` unités.
+- **V1a** — **Marge de bouteilles** : `N > somme(m_c)`. Les `somme(m_c)` bouteilles sont
+  consommées par la solution finale ; le surplus constitue l'espace de manœuvre. C'est le levier
+  de difficulté le plus sensible (§6.2). Ordre de grandeur des captures : 4 couleurs ordinaires
+  à `m_c = 3` ou `4` occupent 12 à 16 bouteilles sur une trentaine, soit un plateau rempli aux
+  deux tiers.
 - **V1b** — Le contenu initial du collecteur est **exclusivement** de la couleur de collecte et
   strictement inférieur à `K` (sinon le niveau démarre déjà résolu pour cette couleur). Aucune
   contrainte de congruence n'est nécessaire : le versement manuel (§3.1) permet de compléter le
@@ -281,12 +295,15 @@ Un niveau est **valide** si :
 | Levier | Effet |
 |---|---|
 | Nombre de couleurs | Principal facteur de complexité combinatoire. |
+| **Bouteilles par couleur (`m_c`)** | Plus une couleur s'étale sur de bouteilles, plus elle est fragmentée et plus le tri est long. Fait grossir l'espace d'états bien plus vite que le nombre de couleurs. |
 | Nombre de bouteilles | Plus il y en a par rapport aux couleurs, plus c'est facile. |
 | Nombre de bouteilles vides / espace libre total | Le levier le plus sensible : 2 vides = confortable, 1 vide = difficile, 0 vide = très contraint. |
 | Rapport `K / C` | Volume à acheminer vers le collecteur (l'équivalent de `4` bouteilles standard pour `K = 4C`). |
 | Remplissage initial du collecteur | 0 unité = 4 lots à constituer (dur) ; 12 unités = 1 seul lot (facile). Levier le plus lisible pour la courbe de progression. |
 | Part de la couleur de collecte | Elle occupe `K` unités, soit bien plus qu'une couleur ordinaire : elle sature le plateau au départ et le libère progressivement. |
 | Fragmentation initiale | Nombre de blocs par couleur : plus il y a de blocs éparpillés, plus c'est long. |
+| **Fragmentation de la couleur de collecte** | Le levier le plus puissant, voir §6.3.3. Quatre blocs de `C` posés à plat = niveau mou ; des unités isolées coiffant d'autres couleurs = niveau tendu. |
+| **Enfouissement** | Profondeur moyenne à laquelle une couleur est enterrée sous d'autres. C'est ce qui crée les dépendances entre couleurs. |
 | Couleurs proches visuellement | À **éviter** — c'est de la difficulté perçue comme injuste, et un problème d'accessibilité (§8). |
 
 ### 6.3 Génération
@@ -303,10 +320,81 @@ Méthode retenue : **génération par marche arrière**.
      les rendre à une bouteille standard. Le cas `q = C` vers une bouteille vide est l'inverse
      du transfert automatique ; il faut ensuite continuer à disperser ces unités, faute de quoi
      V1c serait violée.
-3. Vérifier V1–V4 ; relancer le solveur pour obtenir la longueur optimale.
+3. Vérifier V1–V4, puis **mesurer la qualité** du niveau obtenu (§6.3.3) et l'accepter ou le
+   rejeter.
 
 Ce procédé garantit la solvabilité par construction, contrairement à un tirage aléatoire qui
-doit être filtré a posteriori.
+devrait être filtré a posteriori — avec un taux de rejet rédhibitoire.
+
+### 6.3.1 Deux pièges de la marche arrière
+
+Ces deux points font échouer la plupart des générateurs à rebours. Ils sont à traiter dès la
+première version, pas après coup.
+
+**Le coup inverse n'est pas la symétrie du coup direct.** Un versement direct vide *tout* le
+bloc de tête de la source (sauf troncature par la place disponible en destination, §3.2). Si un
+pas arrière rend `q` unités à une bouteille `A` dont le sommet porte déjà cette couleur, le bloc
+de tête d'`A` devient plus grand que `q` : le coup direct correspondant en verserait davantage
+et ne reproduirait pas l'état d'où l'on vient. La parade n'est pas un raisonnement symbolique
+mais une **vérification effective** : à chaque pas arrière, reconstruire l'état antérieur, puis
+contrôler que le coup direct y est légal **et** redonne exactement l'état suivant. Tout candidat
+qui échoue est rejeté.
+
+**Bouchon et transfert automatique sont des propriétés dérivées, jamais stockées dans l'état.**
+La marche arrière traverse en permanence des états qui n'existent pas en jeu : défaire un
+transfert automatique consiste précisément à créer une bouteille standard pleine de la couleur
+de collecte, qui en marche avant se viderait aussitôt. Deux conséquences :
+
+- ces états sont **interdits en sortie** : il faut continuer à disperser ces unités avant de
+  s'arrêter, sans quoi V1c est violée ;
+- le bouchon doit être **recalculé depuis le contenu** à chaque évaluation. S'il était mémorisé
+  dans l'état, une bouteille bouchée par la marche arrière deviendrait une source illégale en
+  marche avant, et le niveau produit serait insoluble tout en paraissant valide.
+
+### 6.3.2 Le nombre de coups mélangés n'est pas la difficulté
+
+La longueur de la marche arrière est un **majorant** de la longueur de solution, pas une mesure.
+Un mélange de 40 pas peut produire un puzzle qui se dénoue en 12 : le chemin parcouru est *une*
+solution, rarement la plus courte. Un générateur sans solveur produit donc des niveaux de
+difficulté **inconnue**.
+
+La marche arrière seule reste utile comme échafaudage (avoir de quoi remplir un écran pendant le
+développement de l'interface), mais **aucun niveau publié ne se passe du solveur**.
+
+### 6.3.3 Critères de qualité d'un niveau
+
+La longueur optimale ne suffit pas : un niveau long peut n'être qu'une suite de coups forcés,
+donc ennuyeux. Quatre mesures, toutes calculables avec le solveur :
+
+| Critère | Mesure | Cible |
+|---|---|---|
+| **Profondeur** | Longueur de la solution optimale (`par`). | Au-dessus du seuil de difficulté (V4), et **court** en v1 : sans annulation (§7.2), un niveau long transforme l'erreur en punition. |
+| **Largeur du chemin** | À chaque position de la solution, part des coups légaux qui préservent la solvabilité. | Ni 1 coup correct sur 20 (punitif), ni tous corrects (sans enjeu). C'est l'indicateur qui sépare un puzzle d'une corvée. |
+| **Échec du glouton** | Faire jouer un agent qui choisit toujours le coup rassemblant le plus d'unités. | Le glouton doit **échouer** là où le solveur réussit. C'est la signature d'un niveau mémorable : la stratégie évidente mène dans le mur. |
+| **Congestion** | Espace libre disponible au fil de la solution. | Doit passer par un creux : le moment où le plateau est le plus saturé est le cœur du niveau. |
+
+### 6.3.4 Où se joue réellement l'intérêt : la couleur de collecte
+
+Le collecteur **n'apporte aucune profondeur de décision**. Y verser la couleur de collecte est
+toujours au moins aussi bon que n'importe quel autre coup (c'est un puits monotone, §9) : il n'y
+a donc jamais de dilemme à son sujet, et un solveur peut même jouer ce coup d'office.
+
+Ce que le collecteur apporte est de la **congestion** : ses `K = 16` unités saturent le plateau
+au départ, enterrent les autres couleurs, et libèrent des bouteilles au compte-gouttes. L'intérêt
+d'un niveau ne se joue donc pas *sur* le collecteur, mais sur **la façon dont sa couleur est
+répartie et sur ce qu'elle recouvre**.
+
+D'où la règle de génération la plus importante :
+
+> Ne pas piloter la difficulté par le nombre de pas de mélange, mais par la **dispersion de la
+> couleur de collecte**. Quatre blocs de `C` posés à plat au fond de quatre bouteilles donnent un
+> niveau mou — quatre transferts automatiques immédiats, quatre bouteilles libérées, plus aucune
+> tension. Les mêmes 16 unités éparpillées en unités isolées **coiffant** d'autres couleurs
+> obligent à reconstituer chaque lot en manœuvrant, et c'est là que naît le puzzle.
+
+Concrètement, le générateur pilote deux paramètres corrélés à la difficulté : le **nombre de
+blocs** de la couleur de collecte (de 4 à 16) et la **part de ces blocs situés en sommet de
+bouteille** (un bloc au sommet est immédiatement mobilisable, un bloc enterré ne l'est pas).
 
 ### 6.4 Format de niveau (proposition)
 
@@ -314,25 +402,55 @@ doit être filtré a posteriori.
 {
   "id": "level-0042",
   "name": "Harder than you think",
-  "colors": ["orange", "green", "blue", "dark", "white"],
+  "palette": ["orange", "green", "blue", "dark", "white"],
   "standardCapacity": 4,
-  "collectorId": 0,
-  "collectColor": "orange",
-  "bottles": [
-    { "id": 0, "capacity": 16, "content": ["orange", "orange", "orange", "orange"] },
-    { "id": 1, "capacity": 4,  "content": ["green", "dark", "dark", "dark"] },
-    { "id": 2, "capacity": 4,  "content": [] }
-  ],
-  "par": 38
+  "collector": { "capacity": 16, "color": 0, "content": "0000" },
+  "bottles": ["1330", "24", "", "3142"],
+  "par": 38,
+  "seed": 918273645,
+  "generator": "1.0.0"
 }
 ```
 
-- `content` est listé **du fond vers le goulot**.
-- `capacity` reste explicite sur chaque bouteille ; `standardCapacity` sert au validateur, qui
-  vérifie qu'exactement une bouteille s'en écarte — le collecteur, désigné par `collectorId`.
-- `collectColor` est redondante avec le contenu initial du collecteur quand celui-ci n'est pas
-  vide, mais doit rester explicite : un collecteur peut démarrer à 0 unité (V1b).
+- Chaque bouteille est une **chaîne de chiffres**, du fond vers le goulot, chaque chiffre
+  indexant `palette`. Compact et lisible en diff : on voit d'un coup d'œil ce qui a changé.
+- `bottles` ne contient que les bouteilles standard, toutes de capacité `standardCapacity` ; le
+  collecteur est décrit à part, avec sa capacité et sa couleur.
+- `collector.color` reste explicite même si le contenu initial la révèle : un collecteur peut
+  démarrer vide (V1b).
+- `seed` et `generator` sont des **traces de provenance**, pas un format de stockage : ils
+  permettent de rejouer une génération, de comprendre un niveau anormal et de détecter les
+  régressions du générateur. Le contenu du niveau reste stocké explicitement — une graine ne
+  reproduit son niveau que si le code du générateur est resté rigoureusement identique.
+- Un fichier par niveau dans `levels/` (historique git lisible), concaténés au build en un seul
+  JSON inliné dans le bundle.
 - `par` = longueur de la solution optimale trouvée par le solveur, sert au barème d'étoiles.
+
+---
+
+### 6.5 Outillage de génération
+
+Le générateur et le solveur **vivent dans le dépôt**, en TypeScript, au-dessus du même moteur de
+règles que le jeu — pas de seconde implémentation à maintenir en parallèle. Ils s'exécutent sous
+Node via `npm run levels:gen`, et n'importe qui peut les relancer.
+
+Deux points d'exécution :
+
+- **En local**, pour le développement et les petits lots.
+- **En intégration continue**, via un workflow `workflow_dispatch` paramétré (palier de
+  difficulté, nombre de niveaux, graine). Le dépôt étant public, les runners GitHub sont gratuits
+  et sans quota de minutes ; la recherche de candidats étant parallélisable, un job matriciel
+  répartit le travail. Le workflow **ouvre une pull request** avec les niveaux produits et leurs
+  métriques — jamais un push direct : une génération ratée ne doit pas partir en production sans
+  relecture. Conséquence utile : les niveaux peuvent être régénérés depuis l'interface web de
+  GitHub, sans poste de développement.
+
+Deux conditions pour que la reproductibilité tienne :
+
+- **Générateur pseudo-aléatoire maison** (type `mulberry32`, une vingtaine de lignes).
+  `Math.random` n'accepte pas de graine et ruinerait toute traçabilité.
+- **Version de Node épinglée** dans le workflow, pour que la CI produise exactement ce que
+  produit une exécution locale.
 
 ---
 
@@ -385,6 +503,32 @@ Conservés ici pour mémoire, à réévaluer une fois la v1 jouable :
 - **Indice** — proposerait le prochain coup d'une solution optimale. Impose un solveur capable de
   tourner sur l'état **courant** et pas seulement à la génération (§9).
 
+### 7.5 Écran d'accueil : deux modes
+
+L'écran de départ propose deux entrées, aux promesses délibérément différentes :
+
+| Mode | Source du niveau | Promesse |
+|---|---|---|
+| **Campagne** | Niveaux pré-générés, livrés avec le jeu | Difficulté calibrée, `par` mesuré, progression ordonnée |
+| **Niveau aléatoire** | Généré dans le navigateur, à la demande | Variété infinie, toujours soluble, difficulté approximative |
+
+Le mode aléatoire embarque **le générateur, pas le pipeline complet** : la marche arrière depuis
+l'état résolu est instantanée et garantit la solvabilité à elle seule (§6.3), mais faire noter
+des centaines de candidats par le solveur prendrait des minutes. Le bouton produit donc quelques
+candidats, les classe avec les **critères bon marché** du pré-filtre (fragmentation de la couleur
+de collecte, enfouissement, espace libre — ceux qui ne demandent pas de solveur) et retient le
+meilleur. Le tout dans un *Web Worker*, avec un budget de temps de l'ordre de la seconde et un
+repli sur le meilleur candidat trouvé, pour que l'interface ne se fige jamais.
+
+Les libellés doivent refléter cet écart plutôt que suggérer deux boutons équivalents : le `par`
+d'un niveau aléatoire est une estimation, pas une mesure.
+
+**Code de partage.** Un niveau aléatoire affiche sa graine et la version du générateur sous forme
+de code court. Le ressaisir reproduit exactement le même niveau, ce qui permet de le rejouer ou
+de l'envoyer à quelqu'un. Avec la réserve du §6.4 : un code n'est valable que pour la version du
+générateur qui l'a produit, et un code issu d'une version disparue doit être refusé proprement,
+jamais silencieusement réinterprété.
+
 ---
 
 ## 8. Accessibilité
@@ -409,9 +553,16 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
 - **Fonction successeur** : appliquer le coup **puis** la phase de résolution (§4) — bouchon et
   transfert automatique font partie de la transition, pas d'un état intermédiaire. Un état du
   graphe est donc toujours un état « stabilisé ».
-- **Heuristique admissible** proposée : `sum(nb_blocs(c) - 1)` sur toutes les couleurs — chaque
-  bloc surnuméraire d'une couleur exige au minimum un versement. Les unités déjà dans le
-  collecteur comptent pour un seul bloc, ce qui reste admissible.
+- **Heuristique admissible** : `sum over c of max(0, blocs(c) - m_c)`, où `blocs(c)` est le
+  nombre de blocs contigus de la couleur `c` sur le plateau et `m_c` le nombre de bouteilles
+  qu'elle doit occuper à la fin (1 pour la couleur de collecte, son collecteur). Justification :
+  un versement réduit le nombre de blocs d'une couleur d'**au plus un** — il fusionne deux blocs
+  au mieux, et un versement vers une bouteille vide ou un versement partiel n'en supprime aucun.
+  L'état final compte exactement `m_c` blocs par couleur.
+
+  ⚠️ La formule naïve `sum(blocs(c) - 1)` — correcte quand chaque couleur tient dans une seule
+  bouteille — **surestime** ici le coût restant et rend la recherche inadmissible : elle
+  retournerait des solutions non optimales en les croyant optimales.
 - **Élagage propre au collecteur** : verser la couleur de collecte vers le collecteur ne réduit
   jamais les possibilités (le collecteur est un puits monotone, invariant I4). Quand un tel coup
   est disponible, il est toujours au moins aussi bon que les autres : on peut le jouer
@@ -422,6 +573,14 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
   qu'une couleur, son état se résume à un entier — son remplissage. Clé d'état :
   `(remplissage_collecteur, contenus_standard_triés)`.
 - Limites de temps / nœuds explorés, avec repli sur une solution non optimale si dépassement.
+- **Passage à l'échelle — à vérifier tôt.** Un plateau type (une trentaine de bouteilles, ~76
+  unités, une couleur sur 3 ou 4 bouteilles) engendre un espace d'états très supérieur à celui
+  d'un Water Sort où chaque couleur tient dans un tube. Prouver l'optimalité peut devenir hors
+  de portée. Position retenue : mesurer avant de promettre, et si l'optimalité n'est pas
+  atteignable dans un budget raisonnable, publier le `par` comme **meilleure solution connue**
+  plutôt que comme optimum — en le nommant ainsi dans le format de niveau. Les critères de
+  qualité (§6.3.3) restent valables sur une borne supérieure, à condition de ne pas la confondre
+  avec l'optimum.
 
 ---
 
@@ -440,6 +599,10 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
 | D7 | Aides du joueur en v1 | §7.2 | **Aucune** — puzzle pur, `recommencer` seul recours ; l'historique reste tenu en mémoire |
 | D8 | Le bouchon est-il réversible en cas d'annulation ? | §4.5 | Oui — sans objet en v1, à respecter si l'annulation arrive |
 | D9 | Détection des positions insolubles | §5.2 | Hors ligne, à la génération |
+| D10 | Une couleur occupe-t-elle une seule bouteille ? | §1, §6.1 | **Non** — `m_c` bouteilles par couleur ordinaire, typiquement 3 ou 4 |
+| D11 | Condition de victoire | §5.1 | **Toutes les bouteilles vides ou bouchées** — « monochrome » seul est insuffisant |
+| D12 | Écran d'accueil | §7.5 | Deux modes : campagne pré-générée et niveau aléatoire généré dans le navigateur |
+| D13 | Où vit le code de génération ? | §6.5 | Dans le dépôt, exécutable en local et en CI, sortie en pull request |
 
 ### 10.2 Encore ouvertes
 
