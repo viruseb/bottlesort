@@ -649,6 +649,9 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
 | D11 | Condition de victoire | §5.1 | **Toutes les bouteilles vides ou bouchées** — « monochrome » seul est insuffisant |
 | D12 | Écran d'accueil | §7.5 | Deux modes : campagne pré-générée et niveau aléatoire généré dans le navigateur |
 | D13 | Où vit le code de génération ? | §6.5 | Dans le dépôt, exécutable en local et en CI, sortie en pull request |
+| D14 | Barème | §12 | Trois étoiles au `par` **ou mieux**, deux jusqu'à `par x 1,3`, une au-delà. Pas de note pour un niveau aléatoire |
+| D15 | Déverrouillage | §12 | Séquentiel : le niveau suivant s'ouvre à la réussite du précédent |
+| D16 | Sauvegarde | §12 | Locale, versionnée, lecture défensive, repli silencieux si le stockage est refusé |
 
 ### 10.2 Encore ouvertes
 
@@ -667,5 +670,47 @@ Aucune de ces questions ne bloque le démarrage de l'implémentation : ce sont d
 
 ## 11. Hors périmètre de ce document
 
-Progression et carte des niveaux, monétisation, publicités, sauvegarde et synchronisation,
-sons et habillage, classements. À traiter séparément une fois le cœur de jeu figé.
+Monétisation, publicités, synchronisation entre appareils, sons, classements. À traiter
+séparément une fois le cœur de jeu figé.
+
+---
+
+## 12. Progression
+
+### 12.1 Barème
+
+| Note | Condition |
+|---|---|
+| ★★★ | `coups <= par` |
+| ★★ | `coups <= arrondi_sup(par x 1,3)` |
+| ★ | au-delà |
+
+Le seuil haut est **`<=` et non `=`**, volontairement. Au-delà d'une dizaine de bouteilles le
+`par` n'est qu'une *meilleure solution connue* (§9) : un joueur peut légitimement faire mieux, et
+ce serait absurde de l'en punir.
+
+Un niveau **aléatoire n'est pas noté** : sa difficulté n'étant pas calibrée et son `par` inconnu,
+toute étoile serait arbitraire. L'interface affiche le nombre de coups, rien de plus.
+
+### 12.2 Déverrouillage
+
+Séquentiel : le niveau `n + 1` s'ouvre dès que le niveau `n` est réussi, et tout niveau déjà
+terminé reste rejouable. Le bouton **Campagne** reprend au premier niveau non terminé plutôt
+qu'au début.
+
+Le verrouillage ne peut pas piéger le joueur : tout niveau publié est prouvé soluble (V3), et
+`recommencer` reste disponible à tout moment — c'est d'ailleurs le seul recours en v1 (§7.2).
+
+### 12.3 Sauvegarde
+
+Locale au navigateur, sous une clé versionnée. Trois exigences :
+
+- **Repli silencieux.** Le stockage peut être indisponible — navigation privée, site data
+  bloqué. La partie reste alors jouable, la progression n'étant simplement pas retenue.
+- **Lecture défensive.** La sauvegarde vient du navigateur du joueur : elle peut être tronquée,
+  d'une version antérieure ou trafiquée. Tout format inattendu repart d'une progression vide au
+  lieu de faire planter le jeu ; une entrée aberrante est écartée sans jeter les autres.
+- **Numéro de version.** Un changement de format se migre ou se rejette, il ne se devine pas.
+
+Seul le **meilleur** nombre de coups par niveau est conservé : une partie moins bonne n'écrase
+jamais un record.

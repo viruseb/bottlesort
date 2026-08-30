@@ -1,11 +1,13 @@
 import { loadLevel } from '../engine/level'
-import { topRun } from '../engine/bottle'
-import { applyMove, canPour, isBlocked, isWon } from '../engine/rules'
+import { freeSpace, topRun } from '../engine/bottle'
+import { applyPour, canPour, isBlocked, isWon, resolve } from '../engine/rules'
 import { COLLECTOR, type ColorId, type GameState, type LevelSpec, type Move } from '../engine/types'
 
 /** Dernier versement joué, de quoi l'animer. */
 export interface Pour extends Move {
   readonly color: ColorId
+  /** Unités réellement déplacées : la coulée dure d'autant plus longtemps. */
+  readonly quantity: number
 }
 
 export type Status = 'playing' | 'won' | 'blocked'
@@ -22,6 +24,16 @@ export class Session {
   private readonly history: Move[] = []
   selected: number | null = null
   lastPour: Pour | null = null
+
+  /**
+   * État juste après le versement, avant la résolution. L'affichage s'en sert
+   * pour montrer la bouteille pleine avant de l'expédier au collecteur ; sans
+   * lui, le transfert automatique serait invisible.
+   */
+  intermediate: GameState | null = null
+
+  /** Bouteille partie dans le collecteur lors du dernier coup, s'il y en a une. */
+  pendingTransfer: number | null = null
 
   constructor(spec: LevelSpec) {
     this.spec = spec
@@ -69,10 +81,23 @@ export class Session {
     }
 
     const from = this.selected
-    const poured = topRun(this.current.bottles[from]!)
-    this.current = applyMove(this.current, { from, to: index })
+    const source = this.current.bottles[from]!
+    const poured = topRun(source)
+    const quantity = poured ? Math.min(poured.size, freeSpace(this.current.bottles[index]!)) : 0
+
+    const intermediate = applyPour(this.current, { from, to: index })
+    const settled = resolve(intermediate)
+
+    this.intermediate = intermediate
+    this.pendingTransfer = intermediate.bottles.findIndex(
+      (bottle, at) =>
+        at !== COLLECTOR && bottle.content.length > 0 && settled.bottles[at]?.content.length === 0,
+    )
+    if (this.pendingTransfer === -1) this.pendingTransfer = null
+
+    this.current = settled
     this.history.push({ from, to: index })
-    this.lastPour = poured ? { from, to: index, color: poured.color } : null
+    this.lastPour = poured ? { from, to: index, color: poured.color, quantity } : null
     this.selected = null
     return true
   }
@@ -82,5 +107,7 @@ export class Session {
     this.history.length = 0
     this.selected = null
     this.lastPour = null
+    this.intermediate = null
+    this.pendingTransfer = null
   }
 }
