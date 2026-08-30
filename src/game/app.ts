@@ -1,8 +1,33 @@
 import { campaign } from './levels'
+import { Pourer } from './pour'
 import { generateLevel } from './random'
 import { renderBoard } from './render'
 import { Session } from './session'
 import type { LevelSpec } from '../engine/types'
+
+const PATTERNS_KEY = 'bottlesort:patterns'
+
+/**
+ * Le mode motifs est une préférence d'affichage locale : le stockage peut être
+ * refusé (navigation privée, site data bloqué), auquel cas on retombe
+ * simplement sur le mode par défaut.
+ */
+function readPatterns(): boolean {
+  try {
+    return localStorage.getItem(PATTERNS_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function applyPatterns(enabled: boolean): void {
+  document.documentElement.toggleAttribute('data-patterns', enabled)
+  try {
+    localStorage.setItem(PATTERNS_KEY, enabled ? '1' : '0')
+  } catch {
+    // Préférence non mémorisée : sans conséquence sur la partie en cours.
+  }
+}
 
 interface Elements {
   home: HTMLElement
@@ -17,6 +42,7 @@ interface Elements {
 export function start(elements: Elements): void {
   let session: Session | null = null
   let campaignIndex: number | null = null
+  const pourer = new Pourer()
 
   const refresh = (): void => {
     if (!session) return
@@ -68,8 +94,19 @@ export function start(elements: Elements): void {
     if (!target || !session) return
     const index = Number.parseInt(target.dataset['index'] ?? '', 10)
     if (Number.isNaN(index)) return
-    session.tap(index)
-    refresh()
+    // Un appui pendant une animation la termine sur-le-champ plutôt que d'être
+    // ignoré : sur un puzzle qu'on enchaîne vite, rien n'est plus agaçant qu'un
+    // coup avalé.
+    if (pourer.busy) pourer.finish()
+
+    const moved = session.tap(index)
+    const pour = session.lastPour
+    if (moved && pour) {
+      const color = `var(--liquid-${session.spec.palette[pour.color] ?? 'unknown'})`
+      pourer.play(elements.board, pour, color, refresh)
+    } else {
+      refresh()
+    }
   })
 
   document.querySelector('#play-campaign')?.addEventListener('click', () => openCampaign(0))
@@ -87,6 +124,17 @@ export function start(elements: Elements): void {
     if (campaignIndex === null) return
     openCampaign(campaignIndex + 1)
   })
+
+  const patterns = document.querySelector<HTMLButtonElement>('#patterns')
+  if (patterns) {
+    const sync = (enabled: boolean): void => {
+      applyPatterns(enabled)
+      patterns.setAttribute('aria-pressed', String(enabled))
+      patterns.textContent = enabled ? 'Motifs : activés' : 'Motifs : désactivés'
+    }
+    sync(readPatterns())
+    patterns.addEventListener('click', () => sync(!readPatterns()))
+  }
 
   const list = document.querySelector('#campaign-list')
   if (list) {

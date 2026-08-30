@@ -64,6 +64,8 @@ function updateBottle(button: HTMLButtonElement, session: Session, index: number
           const layer = document.createElement('span')
           layer.className = 'layer'
           layer.style.background = colorVariable(palette, color)
+          // Sert au mode motifs : la trame dépend de la couleur, pas de sa teinte.
+          layer.dataset['color'] = palette[color] ?? 'unknown'
           // Seules les couches qui viennent d'arriver s'animent, et la classe
           // est retirée dès l'animation finie pour que le DOM reste honnête.
           if (depth >= previousLength) {
@@ -91,6 +93,18 @@ function updateBottle(button: HTMLButtonElement, session: Session, index: number
 
   button.classList.toggle('is-selected', session.selected === index)
   button.classList.toggle('is-corked', corked)
+
+  // Le bouchon n'est ajouté qu'au moment où la bouteille se complète, pour que
+  // son animation ne se rejoue pas à chaque rendu.
+  const existingCork = button.querySelector('.bottle__cork')
+  if (corked && !existingCork) {
+    const cork = document.createElement('span')
+    cork.className = 'bottle__cork'
+    button.append(cork)
+  } else if (!corked && existingCork) {
+    existingCork.remove()
+  }
+
   button.setAttribute('aria-pressed', String(session.selected === index))
   button.disabled = corked
 }
