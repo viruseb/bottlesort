@@ -270,11 +270,8 @@ Un niveau est **valide** si :
   `m_c >= 1` (typiquement 3 ou 4) ; pour la couleur de collecte `total(collectColor) = K`
   exactement — assez pour remplir le collecteur, et pas davantage, faute de quoi le reliquat
   resterait orphelin. Total à trier : `C * somme(m_c) + K` unités.
-- **V1a** — **Marge de bouteilles** : `N > somme(m_c)`. Les `somme(m_c)` bouteilles sont
-  consommées par la solution finale ; le surplus constitue l'espace de manœuvre. C'est le levier
-  de difficulté le plus sensible (§6.2). Ordre de grandeur des captures : 4 couleurs ordinaires
-  à `m_c = 3` ou `4` occupent 12 à 16 bouteilles sur une trentaine, soit un plateau rempli aux
-  deux tiers.
+  Ordre de grandeur des captures : 4 couleurs ordinaires à `m_c = 3` ou `4` occupent 12 à 16
+  bouteilles sur une trentaine, soit un plateau rempli aux deux tiers.
 - **V1b** — Le contenu initial du collecteur est **exclusivement** de la couleur de collecte et
   strictement inférieur à `K` (sinon le niveau démarre déjà résolu pour cette couleur). Aucune
   contrainte de congruence n'est nécessaire : le versement manuel (§3.1) permet de compléter le
@@ -282,9 +279,11 @@ Un niveau est **valide** si :
   de `C`.
 - **V1c** — Aucune bouteille standard n'est, à l'état initial, pleine de la couleur de collecte
   (§4.4), ni pleine et monochrome d'une couleur ordinaire.
-- **V2** — Il existe au moins une marge de manœuvre : somme des espaces libres initiaux `>= 1`,
-  et en pratique une ou deux bouteilles vides (ou largement entamées) pour rendre le niveau
-  jouable.
+- **V2** — **Marge de manœuvre**, mesurée en **espace libre** et non en nombre de bouteilles :
+  la somme des espaces libres des bouteilles standard vaut au moins `C`. Un plateau entièrement
+  plein n'offre aucun coup, quel que soit le nombre de contenants ; à l'inverse, compter les
+  bouteilles excédentaires ne dit rien, puisque les unités de la couleur de collecte encore en
+  jeu occupent elles aussi de la place. En pratique, viser une à deux bouteilles vides.
 - **V3** — Le niveau est **prouvé soluble** par le solveur (§6.3). Aucun niveau ne doit être
   publié sans preuve de solvabilité.
 - **V4** — Le niveau n'est pas trivial : longueur de la solution optimale supérieure à un seuil
