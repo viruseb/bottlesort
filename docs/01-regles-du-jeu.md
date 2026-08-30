@@ -19,11 +19,16 @@ Caractéristiques du jeu :
 - **Aucune limite de temps ni de nombre de coups** (par défaut).
 - **Difficulté par blocage** : un mauvais enchaînement mène à une position insoluble, d'où la
   nécessité d'un système d'annulation (*undo*) et d'un garde-fou de détection de blocage.
-- **Spécificité de cette variante : une grande bouteille unique.** Le plateau se compose de
-  `N` **bouteilles standard** de capacité **uniforme** `C` (`C = 4` sur les captures de
-  référence) et d'**une seule grande bouteille**, la colonne de gauche, de capacité `K > C`.
-  Les silhouettes des bouteilles standard varient (habillage graphique) mais **pas** leur
-  capacité : seul le nombre de couches compte.
+- **Spécificité de cette variante : le collecteur.** Le plateau se compose de `N` **bouteilles
+  standard** de capacité **uniforme** `C = 4` et d'**un collecteur** unique — la colonne de
+  gauche — de capacité `K = 4 x C = 16`. Les silhouettes des bouteilles standard varient
+  (habillage graphique) mais **pas** leur capacité : seul le nombre de couches compte.
+- **Le collecteur n'est pas une simple grande bouteille.** Il est associé à une **couleur de
+  collecte** fixée par le niveau. Quand une bouteille standard se retrouve **pleine de cette
+  couleur**, elle ne se bouche pas : son contenu part **automatiquement** dans le collecteur et
+  la bouteille redevient vide. Le collecteur ne se bouche qu'une fois plein. C'est le cœur
+  tactique du jeu : la couleur de collecte se rassemble par lots de `C`, et chaque lot expédié
+  **libère une bouteille** — la ressource la plus rare du puzzle.
 
 ---
 
@@ -43,13 +48,18 @@ Caractéristiques du jeu :
 | **Bouteille monochrome** | Toutes les unités de la même couleur (une bouteille vide est un cas particulier). |
 | **Bouteille complétée** | Pleine **et** monochrome → elle est bouchée (liège) et verrouillée. |
 | **Transvasement** (*pour*) | Un coup : déplacement d'unités d'une bouteille source vers une destination. |
+| **Collecteur** | L'unique bouteille de capacité `K`, dédiée à une seule couleur. |
+| **Couleur de collecte** | La couleur associée au collecteur, fixée par le niveau. |
+| **Transfert automatique** | Vidage automatique d'une bouteille standard pleine de la couleur de collecte vers le collecteur. Ce n'est pas un coup du joueur. |
 
 ### 2.1 État du jeu
 
 ```
 Level {
-  colors     : liste des couleurs utilisées
-  bottles    : liste de Bottle           // l'ordre définit la position à l'écran
+  colors        : liste des couleurs utilisées
+  bottles       : liste de Bottle        // l'ordre définit la position à l'écran
+  collectorId   : id de la bouteille collecteur
+  collectColor  : Color                  // couleur associée au collecteur
 }
 
 Bottle {
@@ -70,10 +80,11 @@ Invariants permanents (à vérifier par assertion en dev) :
 - **I1** — `0 <= len(content) <= capacity` pour toute bouteille.
 - **I2** — Pour chaque couleur `c` : `total(c)` (nombre d'unités de `c` sur le plateau) est
   **constant** tout au long de la partie. Aucune unité n'est créée ni détruite.
-- **I3** — Pour chaque couleur `c`, il existe au moins une bouteille de capacité `>= total(c)`,
-  sinon le niveau est insoluble par construction. Concrètement : chaque couleur a soit
-  `total(c) = C` (elle finit dans une bouteille standard), soit `total(c) <= K` pour **au plus
-  une** couleur, celle destinée à la grande bouteille. Voir §6.1.
+- **I3** — Chaque couleur dispose d'un contenant capable de l'accueillir entièrement :
+  `total(c) = C` pour toute couleur ordinaire, `total(collectColor) = K` pour la couleur de
+  collecte. Voir §6.1.
+- **I4** — Le collecteur ne contient jamais que la couleur de collecte, et son remplissage est
+  monotone croissant (aucun coup n'en retire d'unité).
 
 ---
 
@@ -90,7 +101,16 @@ Le coup est **légal** si et seulement si **toutes** les conditions suivantes so
 3. `destination` n'est pas complétée (bouchée) ;
 4. `destination` a au moins 1 unité d'espace libre ;
 5. `destination` est vide **ou** la couleur de son sommet est égale à la couleur du bloc de
-   tête de `source`.
+   tête de `source` ;
+6. `source` n'est pas le collecteur : celui-ci est un **puits**, il se remplit mais ne se vide
+   jamais (invariant I4).
+
+Le collecteur **est** en revanche une destination manuelle valide : le joueur peut y verser
+directement depuis une bouteille standard, sans attendre d'en avoir rempli une entièrement. La
+condition 5 s'y applique normalement, ce qui revient — le collecteur ne contenant jamais que la
+couleur de collecte — à n'accepter que celle-ci. `[À CONFIRMER]` Lorsque le collecteur démarre
+**vide**, la condition 5 laisserait passer n'importe quelle couleur : il faut alors la
+restreindre explicitement à `collectColor`.
 
 Un coup illégal est refusé sans modifier l'état (et sans consommer de coup, ni d'annulation).
 
@@ -125,19 +145,65 @@ pollue l'historique. Deux options :
 
 ---
 
-## 4. Complétion et verrouillage d'une bouteille
+## 4. Résolution après un coup : bouchon ou transfert automatique
 
-Après chaque coup, toute bouteille **pleine et monochrome** passe à l'état **complétée** :
+Après chaque coup, le moteur applique une **phase de résolution** déterministe, qui n'est pas
+un coup du joueur et ne se compte pas dans le score. Deux cas s'excluent mutuellement.
 
-- elle reçoit visuellement un **bouchon en liège** ;
-- elle est **verrouillée** : elle ne peut plus être ni source ni destination.
+### 4.1 Bouchon (couleurs ordinaires)
 
-`[À CONFIRMER]` Une bouteille monochrome mais **non pleine** n'est pas complétée et reste
-jouable : c'est cohérent avec les captures de référence (une bouteille contenant une seule
-couleur au tiers de sa hauteur n'y porte pas de bouchon).
+Une bouteille standard **pleine et monochrome d'une couleur autre que la couleur de collecte**
+passe à l'état **complétée** :
 
-`[À CONFIRMER]` Le verrouillage doit-il être réversible par *undo* ? **Oui** : l'annulation
-restaure l'état exact précédent, bouchon compris.
+- elle reçoit un **bouchon en liège** ;
+- elle est **verrouillée** : plus jamais source ni destination.
+
+Une bouteille monochrome mais **non pleine** n'est pas complétée et reste jouable — cohérent
+avec les captures, où une bouteille remplie au tiers d'une seule couleur ne porte pas de
+bouchon.
+
+### 4.2 Transfert automatique (couleur de collecte)
+
+Une bouteille standard **pleine de la couleur de collecte** ne se bouche **pas**. À la place :
+
+1. animation de versement de la bouteille vers le collecteur ;
+2. ses `C` unités sont déplacées dans le collecteur ;
+3. la bouteille standard redevient **vide** et immédiatement réutilisable.
+
+Le transfert est **automatique et obligatoire** : le joueur ne le déclenche ni ne le refuse.
+Il automatise un coup que le joueur pourrait faire à la main (§3.1) — son intérêt est
+d'économiser une manipulation et de rendre la bouteille disponible immédiatement. C'est cette
+libération de bouteilles qui alimente la suite du puzzle.
+
+**Pas d'enchaînement possible** : un transfert vide une bouteille, il ne peut donc pas rendre
+une autre bouteille pleine. La phase de résolution converge en une seule passe.
+
+**Débordement : impossible par construction.** Le collecteur ne peut pas manquer de place pour
+un transfert. Démonstration : sous V1 (§6.1) `total(collectColor) = K`, et le collecteur ne
+contient que cette couleur ; s'il lui reste `f` unités libres, alors `K - f` unités y sont déjà
+et les `f` restantes sont réparties ailleurs sur le plateau. Une bouteille standard pleine de
+la couleur de collecte en contient `C`, donc `f >= C`. Le repli — transfert partiel laissant le
+reste dans la bouteille standard — ne doit donc jamais s'observer ; s'il se déclenche, c'est un
+bug de génération de niveau et il doit remonter comme tel.
+
+### 4.3 Bouchon du collecteur
+
+Le collecteur reçoit son bouchon lorsqu'il est **plein** (`K` unités de la couleur de collecte).
+Il est alors verrouillé, comme une bouteille complétée ordinaire. La couleur de collecte est
+définitivement rangée.
+
+### 4.4 État initial
+
+Un niveau ne doit **pas** contenir, à l'état initial, de bouteille standard déjà pleine de la
+couleur de collecte : ce serait un transfert automatique gratuit avant le premier coup. C'est
+une règle de validité du générateur (§6.1), pas un cas à traiter à l'exécution.
+
+### 4.5 Annulation
+
+L'annulation restaure l'état exact précédent, **bouchons et transferts automatiques compris** :
+annuler le coup qui a rempli une bouteille de la couleur de collecte remet ces `C` unités dans
+la bouteille standard et les retire du collecteur. Un coup et sa résolution forment donc **une
+seule entrée d'historique** indivisible.
 
 ---
 
@@ -149,6 +215,8 @@ La partie est gagnée quand **toute couleur est entièrement regroupée** : pour
 toutes ses unités se trouvent dans une seule et même bouteille.
 
 Formulation équivalente et plus simple à tester : **chaque bouteille est vide ou monochrome**.
+Pour la couleur de collecte, cela revient à dire que le collecteur est plein et bouché (§4.3),
+puisque toutes ses unités doivent s'y trouver.
 
 > ⚠️ Ne **pas** exiger que chaque bouteille pleine soit la condition de victoire. Une couleur
 > peut légitimement terminer dans la grande bouteille sans la remplir (si `total(c) < K`), ou
@@ -175,11 +243,18 @@ proposition : le faire **hors ligne** à la génération, et à l'exécution seu
 
 Un niveau est **valide** si :
 
-- **V1** — Structure du plateau : `N` bouteilles de capacité `C` et **une** de capacité `K > C`.
-  Pour chaque couleur `c` : `total(c) = C`, à l'exception d'au plus une couleur — celle logée
-  dans la grande bouteille — pour laquelle `total(c) <= K`. Recommandé par défaut :
-  `total(c) = K` exactement, pour que la grande bouteille se bouche elle aussi en fin de partie.
-  Corollaire : le nombre d'unités à trier vaut `(nb_couleurs - 1) * C + K`.
+- **V1** — Structure du plateau : `N` bouteilles standard de capacité `C = 4` et **un**
+  collecteur de capacité `K = 16`. Pour chaque couleur ordinaire `total(c) = C` ; pour la
+  couleur de collecte `total(collectColor) = K` exactement — assez pour remplir le collecteur,
+  et pas davantage, faute de quoi le reliquat resterait orphelin dans une bouteille standard.
+  Corollaire : `(nb_couleurs - 1) * C + K` unités à trier.
+- **V1b** — Le contenu initial du collecteur est **exclusivement** de la couleur de collecte et
+  strictement inférieur à `K` (sinon le niveau démarre déjà résolu pour cette couleur). Aucune
+  contrainte de congruence n'est nécessaire : le versement manuel (§3.1) permet de compléter le
+  collecteur par n'importe quelle quantité, là où le transfert automatique procède par lots
+  de `C`.
+- **V1c** — Aucune bouteille standard n'est, à l'état initial, pleine de la couleur de collecte
+  (§4.4), ni pleine et monochrome d'une couleur ordinaire.
 - **V2** — Il existe au moins une marge de manœuvre : somme des espaces libres initiaux `>= 1`,
   et en pratique une ou deux bouteilles vides (ou largement entamées) pour rendre le niveau
   jouable.
@@ -195,7 +270,9 @@ Un niveau est **valide** si :
 | Nombre de couleurs | Principal facteur de complexité combinatoire. |
 | Nombre de bouteilles | Plus il y en a par rapport aux couleurs, plus c'est facile. |
 | Nombre de bouteilles vides / espace libre total | Le levier le plus sensible : 2 vides = confortable, 1 vide = difficile, 0 vide = très contraint. |
-| Rapport `K / C` | Plus la grande bouteille est grande, plus la couleur qu'elle accueille est éparpillée sur le plateau et longue à rassembler. |
+| Rapport `K / C` | Volume à acheminer vers le collecteur (l'équivalent de `4` bouteilles standard pour `K = 4C`). |
+| Remplissage initial du collecteur | 0 unité = 4 lots à constituer (dur) ; 12 unités = 1 seul lot (facile). Levier le plus lisible pour la courbe de progression. |
+| Part de la couleur de collecte | Elle occupe `K` unités, soit bien plus qu'une couleur ordinaire : elle sature le plateau au départ et le libère progressivement. |
 | Fragmentation initiale | Nombre de blocs par couleur : plus il y a de blocs éparpillés, plus c'est long. |
 | Couleurs proches visuellement | À **éviter** — c'est de la difficulté perçue comme injuste, et un problème d'accessibilité (§8). |
 
@@ -203,10 +280,17 @@ Un niveau est **valide** si :
 
 Méthode retenue : **génération par marche arrière**.
 
-1. Partir de l'état résolu (chaque couleur groupée dans sa bouteille cible).
-2. Appliquer `N` coups inverses valides (mélange), en refusant ceux qui ramènent à un état déjà
-   visité.
-3. Vérifier V1–V4 ; en particulier relancer le solveur pour obtenir la longueur optimale.
+1. Partir de l'état résolu : chaque couleur ordinaire groupée dans une bouteille standard, la
+   couleur de collecte entièrement dans le collecteur (`K` unités).
+2. Appliquer des **coups inverses** valides (mélange), en refusant ceux qui ramènent à un état
+   déjà visité. Deux familles de coups inverses :
+   - inverse d'un transvasement : reprendre `q` unités du sommet d'une bouteille et les rendre
+     à une autre ;
+   - **inverse d'un versement vers le collecteur** : retirer `q <= C` unités du collecteur et
+     les rendre à une bouteille standard. Le cas `q = C` vers une bouteille vide est l'inverse
+     du transfert automatique ; il faut ensuite continuer à disperser ces unités, faute de quoi
+     V1c serait violée.
+3. Vérifier V1–V4 ; relancer le solveur pour obtenir la longueur optimale.
 
 Ce procédé garantit la solvabilité par construction, contrairement à un tirage aléatoire qui
 doit être filtré a posteriori.
@@ -219,8 +303,10 @@ doit être filtré a posteriori.
   "name": "Harder than you think",
   "colors": ["orange", "green", "blue", "dark", "white"],
   "standardCapacity": 4,
+  "collectorId": 0,
+  "collectColor": "orange",
   "bottles": [
-    { "id": 0, "capacity": 12, "content": ["orange", "orange", "orange"] },
+    { "id": 0, "capacity": 16, "content": ["orange", "orange", "orange", "orange"] },
     { "id": 1, "capacity": 4,  "content": ["green", "dark", "dark", "dark"] },
     { "id": 2, "capacity": 4,  "content": [] }
   ],
@@ -230,7 +316,9 @@ doit être filtré a posteriori.
 
 - `content` est listé **du fond vers le goulot**.
 - `capacity` reste explicite sur chaque bouteille ; `standardCapacity` sert au validateur, qui
-  vérifie qu'exactement une bouteille s'en écarte (la grande, §6.1).
+  vérifie qu'exactement une bouteille s'en écarte — le collecteur, désigné par `collectorId`.
+- `collectColor` est redondante avec le contenu initial du collecteur quand celui-ci n'est pas
+  vide, mais doit rester explicite : un collecteur peut démarrer à 0 unité (V1b).
 - `par` = longueur de la solution optimale trouvée par le solveur, sert au barème d'étoiles.
 
 ---
@@ -294,13 +382,21 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
 
 - **Recherche** : BFS pour l'optimalité sur petits niveaux, IDA*/A* avec heuristique pour les
   grands.
+- **Fonction successeur** : appliquer le coup **puis** la phase de résolution (§4) — bouchon et
+  transfert automatique font partie de la transition, pas d'un état intermédiaire. Un état du
+  graphe est donc toujours un état « stabilisé ».
 - **Heuristique admissible** proposée : `sum(nb_blocs(c) - 1)` sur toutes les couleurs — chaque
-  bloc surnuméraire d'une couleur exige au minimum un versement.
-- **Canonisation d'état** indispensable : deux bouteilles de même capacité et de même contenu
-  sont interchangeables → trier les bouteilles par `(capacity, content)` avant de hacher. Les
-  bouteilles standard partageant toutes la capacité `C`, elles sont permutables entre elles ;
-  la grande bouteille, seule de sa capacité, reste naturellement à sa place dans ce tri. Trier
-  sur `(capacity, content)` et non sur `content` seul suffit donc à traiter les deux cas.
+  bloc surnuméraire d'une couleur exige au minimum un versement. Les unités déjà dans le
+  collecteur comptent pour un seul bloc, ce qui reste admissible.
+- **Élagage propre au collecteur** : verser la couleur de collecte vers le collecteur ne réduit
+  jamais les possibilités (le collecteur est un puits monotone, invariant I4). Quand un tel coup
+  est disponible, il est toujours au moins aussi bon que les autres : on peut le jouer
+  d'autorité sans perdre l'optimalité. C'est l'élagage le plus rentable du solveur.
+- **Canonisation d'état** indispensable : les bouteilles standard, toutes de capacité `C`, sont
+  permutables entre elles → les trier par contenu avant de hacher. Le collecteur n'est **pas**
+  permutable (capacité et rôle distincts) : le représenter à part, et comme il ne contient
+  qu'une couleur, son état se résume à un entier — son remplissage. Clé d'état :
+  `(remplissage_collecteur, contenus_standard_triés)`.
 - Limites de temps / nœuds explorés, avec repli sur une solution non optimale si dépassement.
 
 ---
@@ -318,9 +414,11 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
 | Q7 | *Undo* illimité ou limité ? | §7.2 | Illimité en v1 |
 | Q8 | Capacité et coût de la bouteille ajoutée | §7.3 | À définir |
 | Q9 | Barème d'étoiles / progression / méta-jeu | — | Hors périmètre v1 |
-| Q10 | Valeur de `K` (capacité de la grande bouteille) et de `C` | §6.1 | `C = 4` ; `K` à mesurer, ~10–12 sur les captures |
-| Q11 | La grande bouteille suit-elle exactement les mêmes règles (source **et** destination, bouchon en fin) ? | §2.1, §4 | Oui — bouteille ordinaire, seule sa capacité diffère |
-| Q12 | `K` est-il constant sur tous les niveaux, ou un paramètre de difficulté ? | §6.2 | Paramètre de niveau |
+| Q10 | Le collecteur peut-il être **source** d'un versement ? | §3.1 | Non — c'est un puits (I4) |
+| Q11 | Collecteur démarrant **vide** : accepte-t-il n'importe quelle couleur, ou seulement `collectColor` ? | §3.1 | Seulement `collectColor`, restriction explicite |
+| Q12 | `K = 16` et `C = 4` sont-ils constants sur tous les niveaux, ou variables selon la difficulté ? | §6.1 | Paramètres de niveau, `K = 16` par défaut |
+| Q13 | Un niveau peut-il avoir **plusieurs** collecteurs, ou zéro ? | §2.1 | Exactement un en v1 |
+| Q14 | Le transfert automatique compte-t-il dans le nombre de coups affiché / le `par` ? | §4 | Non |
 
 ---
 
