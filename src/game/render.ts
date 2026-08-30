@@ -1,4 +1,4 @@
-import { COLLECTOR, type Bottle } from '../engine/types'
+import { COLLECTOR, type Bottle, type GameState } from '../engine/types'
 import type { Session } from './session'
 
 function colorVariable(palette: readonly string[], index: number): string {
@@ -109,8 +109,13 @@ function updateBottle(button: HTMLButtonElement, session: Session, index: number
   button.disabled = corked
 }
 
-export function renderBoard(session: Session, host: HTMLElement): void {
-  const state = session.state
+/**
+ * `override` permet d'afficher un état qui n'est pas celui du moteur — en
+ * pratique l'instant intermédiaire, avant que la résolution n'expédie une
+ * bouteille dans le collecteur.
+ */
+export function renderBoard(session: Session, host: HTMLElement, override?: GameState): void {
+  const state = override ?? session.state
   const expected = state.bottles.length
 
   // La structure n'est bâtie qu'une fois par niveau ; ensuite tout se met à

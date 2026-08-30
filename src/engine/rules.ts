@@ -87,10 +87,14 @@ export function resolve(state: GameState): GameState {
 }
 
 /**
- * Applique un coup et sa résolution. Le couple forme une transition unique :
- * un état retourné par `applyMove` est toujours stabilisé.
+ * Applique le seul versement, **sans** la phase de résolution. L'état retourné
+ * n'est pas stabilisé : il peut contenir une bouteille pleine de la couleur de
+ * collecte, que la résolution expédiera.
+ *
+ * Réservé à l'affichage, qui a besoin de cet instant intermédiaire pour animer
+ * le transfert automatique. Le jeu, lui, passe toujours par `applyMove`.
  */
-export function applyMove(state: GameState, move: Move): GameState {
+export function applyPour(state: GameState, move: Move): GameState {
   const { from, to } = move
   if (!canPour(state, from, to)) {
     throw new Error(`Coup illégal : ${from} -> ${to}`)
@@ -105,7 +109,15 @@ export function applyMove(state: GameState, move: Move): GameState {
   bottles[from] = withContent(source, source.content.slice(0, source.content.length - quantity))
   bottles[to] = withContent(target, [...target.content, ...Array<ColorId>(quantity).fill(run.color)])
 
-  return resolve({ ...state, bottles })
+  return { ...state, bottles }
+}
+
+/**
+ * Applique un coup et sa résolution. Le couple forme une transition unique :
+ * un état retourné par `applyMove` est toujours stabilisé.
+ */
+export function applyMove(state: GameState, move: Move): GameState {
+  return resolve(applyPour(state, move))
 }
 
 /**

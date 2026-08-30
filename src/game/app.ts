@@ -3,7 +3,11 @@ import { Pourer } from './pour'
 import { generateLevel } from './random'
 import { renderBoard } from './render'
 import { Session } from './session'
-import type { LevelSpec } from '../engine/types'
+import { COLLECTOR, type ColorId, type LevelSpec } from '../engine/types'
+
+function colorOf(session: Session, color: ColorId): string {
+  return `var(--liquid-${session.spec.palette[color] ?? 'unknown'})`
+}
 
 const PATTERNS_KEY = 'bottlesort:patterns'
 
@@ -101,12 +105,44 @@ export function start(elements: Elements): void {
 
     const moved = session.tap(index)
     const pour = session.lastPour
-    if (moved && pour) {
-      const color = `var(--liquid-${session.spec.palette[pour.color] ?? 'unknown'})`
-      pourer.play(elements.board, pour, color, refresh)
-    } else {
+    if (!moved || !pour) {
       refresh()
+      return
     }
+
+    const active = session
+
+    /**
+     * Le transfert automatique est le geste signature du jeu : une bouteille
+     * pleine de la couleur de collecte part d'elle-même dans le collecteur. Il
+     * s'anime donc comme un versement, enchaîné au premier — sans quoi la
+     * bouteille disparaîtrait d'un coup, sans explication.
+     */
+    const playTransfer = (interrupted: boolean): void => {
+      const transfer = active.pendingTransfer
+      if (interrupted || transfer === null) {
+        refresh()
+        return
+      }
+
+      pourer.play(
+        elements.board,
+        {
+          from: transfer,
+          to: COLLECTOR,
+          color: active.state.collectColor,
+          quantity: active.intermediate?.bottles[transfer]?.content.length ?? 1,
+        },
+        colorOf(active, active.state.collectColor),
+        { commit: refresh, done: () => refresh() },
+      )
+    }
+
+    pourer.play(elements.board, pour, colorOf(active, pour.color), {
+      // Montre d'abord le versement seul : la résolution attend son animation.
+      commit: () => renderBoard(active, elements.board, active.intermediate ?? undefined),
+      done: playTransfer,
+    })
   })
 
   document.querySelector('#play-campaign')?.addEventListener('click', () => openCampaign(0))
