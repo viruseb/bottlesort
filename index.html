@@ -5,19 +5,46 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="description" content="Puzzle de tri de liquides colorés.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='9' y='3' width='14' height='26' rx='4' fill='%23f07216'/%3E%3Crect x='9' y='3' width='14' height='11' rx='4' fill='%2334a83a'/%3E%3C/svg%3E">
 <title>Bottle Sort</title>
 </head>
 <body>
-<main>
+
+<section id="home" class="screen screen--home">
   <h1>Bottle Sort</h1>
-  <p class="tag">En construction</p>
-  <div class="bottles" id="bottles" aria-hidden="true"></div>
-  <p>
-    Puzzle de tri de liquides colorés.
-    Le jeu n'est pas encore développé — cette page valide la chaîne de publication.
-  </p>
-  <p><a href="https://github.com/viruseb/bottlesort">Code et documentation sur GitHub</a></p>
-</main>
+  <p class="tagline">Trie les liquides. Une bouteille pleine d'une seule couleur se bouche.</p>
+
+  <div class="modes">
+    <button type="button" id="play-campaign" class="mode">
+      <strong>Campagne</strong>
+      <span>Niveaux calibrés, difficulté croissante</span>
+    </button>
+    <button type="button" id="play-random" class="mode mode--secondary">
+      <strong>Niveau aléatoire</strong>
+      <span>Toujours soluble, difficulté non calibrée</span>
+    </button>
+  </div>
+
+  <nav class="campaign" aria-label="Choix du niveau">
+    <p class="campaign__label">Niveaux</p>
+    <div id="campaign-list" class="campaign__list"></div>
+  </nav>
+</section>
+
+<section id="game" class="screen screen--game" hidden>
+  <header class="bar">
+    <button type="button" id="back" class="ghost" aria-label="Retour à l'accueil">←</button>
+    <span id="title" class="bar__title"></span>
+    <button type="button" id="restart" class="ghost">Recommencer</button>
+  </header>
+
+  <p id="status" class="status"></p>
+  <p id="banner" class="banner" hidden></p>
+  <button type="button" id="next" class="primary" hidden>Niveau suivant</button>
+
+  <div id="board" class="board"></div>
+</section>
+
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

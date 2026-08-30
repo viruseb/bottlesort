@@ -30,7 +30,28 @@ npm run build   # vérification TypeScript puis build de production
 La version de Node est épinglée dans `.nvmrc` et reprise par la CI, pour qu'une génération
 locale et une génération en CI produisent le même résultat.
 
+## Structure
+
+| Dossier | Rôle |
+|---|---|
+| `src/engine/` | Moteur de règles, solveur, générateur. TypeScript pur, aucune dépendance au DOM : le même code sert au jeu et aux outils sous Node. |
+| `src/game/` | Interface : plateau, sélection, session de jeu. |
+| `scripts/` | Outils hors ligne — génération de niveaux, mesure du solveur. |
+| `levels/` | Niveaux produits hors ligne et versionnés, inlinés au build. |
+| `docs/` | Définition des règles. |
+
+## Génération de niveaux
+
+```sh
+npm run levels:gen -- --preset facile --count 8 --seed 20260830
+npm run measure   # passage à l'échelle du solveur
+```
+
+La solvabilité est acquise par construction : la génération part de l'état résolu et remonte par
+coups inverses. Le solveur ne sert donc pas à prouver qu'un niveau est jouable, mais à mesurer
+s'il est intéressant.
+
 ## État
 
-Les règles sont définies. Le jeu n'est pas encore développé — la page actuelle est une page
-d'attente. Prochaine étape : le moteur de règles en TypeScript pur, avec ses tests.
+Le jeu est jouable : campagne de huit niveaux et génération aléatoire dans le navigateur.
+L'habillage reste sommaire — l'animation de versement et la finition visuelle viennent ensuite.
