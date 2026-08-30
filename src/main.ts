@@ -14,5 +14,6 @@ start({
   title: byId('title'),
   status: byId('status'),
   banner: byId('banner'),
+  score: byId('score'),
   next: byId<HTMLButtonElement>('next'),
 })

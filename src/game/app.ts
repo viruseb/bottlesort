@@ -1,5 +1,7 @@
 import { campaign } from './levels'
 import { Pourer } from './pour'
+import { bestMoves, isUnlocked, record, starsFor, totalStars, type Progress } from './progress'
+import { loadProgress, saveProgress } from './storage'
 import { generateLevel } from './random'
 import { renderBoard } from './render'
 import { Session } from './session'
@@ -40,13 +42,24 @@ interface Elements {
   title: HTMLElement
   status: HTMLElement
   banner: HTMLElement
+  score: HTMLElement
   next: HTMLButtonElement
+}
+
+const STAR = '★'
+const EMPTY_STAR = '☆'
+
+function stars(count: number): string {
+  return STAR.repeat(count) + EMPTY_STAR.repeat(3 - count)
 }
 
 export function start(elements: Elements): void {
   let session: Session | null = null
   let campaignIndex: number | null = null
+  let progress: Progress = loadProgress()
   const pourer = new Pourer()
+  const ids = campaign.map((level) => level.id)
+  const chips = new Map<number, HTMLButtonElement>()
 
   const refresh = (): void => {
     if (!session) return
@@ -58,19 +71,84 @@ export function start(elements: Elements): void {
 
     const status = session.status
     elements.banner.hidden = status === 'playing'
-    elements.next.hidden = status !== 'won' || campaignIndex === null
+    elements.score.hidden = status !== 'won'
+    elements.next.hidden =
+      status !== 'won' || campaignIndex === null || campaignIndex + 1 >= campaign.length
+
     if (status === 'won') {
       elements.banner.textContent = 'Gagné — tous les bouchons sont posés.'
       elements.banner.className = 'banner banner--won'
+      showScore(session)
     } else if (status === 'blocked') {
       elements.banner.textContent = 'Bloqué : plus aucun coup ne fait avancer le puzzle.'
       elements.banner.className = 'banner banner--blocked'
     }
   }
 
+  /** Enregistre la performance et affiche la note. Idempotent : le rendu est
+   *  rejoué à chaque rafraîchissement, l'enregistrement ne doit pas l'être. */
+  let recordedFor: string | null = null
+
+  const showScore = (active: Session): void => {
+    const { id, par } = active.spec
+    const moves = active.moveCount
+
+    if (recordedFor !== id) {
+      recordedFor = id
+      progress = record(progress, id, moves)
+      saveProgress(progress)
+      refreshHome()
+    }
+
+    const earned = starsFor(moves, par)
+    const best = bestMoves(progress, id)
+    elements.score.innerHTML = ''
+
+    if (earned === null) {
+      elements.score.textContent = `${moves} coups`
+    } else {
+      elements.score.textContent = stars(earned)
+      const detail = document.createElement('span')
+      detail.className = 'score__detail'
+      detail.textContent =
+        best !== null && best < moves
+          ? `${moves} coups — votre record : ${best}`
+          : `${moves} coups pour un par de ${par}`
+      elements.score.append(detail)
+    }
+  }
+
+  const refreshHome = (): void => {
+    const done = ids.filter((id) => bestMoves(progress, id) !== null).length
+    const summary = document.querySelector('#campaign-progress')
+    if (summary) {
+      summary.textContent =
+        done === 0
+          ? 'Niveaux calibrés, difficulté croissante'
+          : `${done}/${campaign.length} terminés — ${totalStars(progress, campaign)} étoiles`
+    }
+
+    chips.forEach((chip, index) => {
+      const spec = campaign[index]
+      if (!spec) return
+      const unlocked = isUnlocked(progress, ids, index)
+      const best = bestMoves(progress, spec.id)
+
+      chip.disabled = !unlocked
+      chip.classList.toggle('is-done', best !== null)
+      chip.title = unlocked ? `${spec.id} — par ${spec.par ?? '?'}` : 'Terminez le niveau précédent'
+
+      const marks = chip.querySelector('.chip__stars')
+      if (marks) {
+        marks.textContent = best === null ? '' : stars(starsFor(best, spec.par) ?? 0)
+      }
+    })
+  }
+
   const open = (spec: LevelSpec, index: number | null, title: string): void => {
     session = new Session(spec)
     campaignIndex = index
+    recordedFor = null
     elements.title.textContent = title
     elements.home.hidden = true
     elements.game.hidden = false
@@ -79,8 +157,14 @@ export function start(elements: Elements): void {
 
   const openCampaign = (index: number): void => {
     const spec = campaign[index]
-    if (!spec) return
+    if (!spec || !isUnlocked(progress, ids, index)) return
     open(spec, index, `Campagne ${index + 1}/${campaign.length}`)
+  }
+
+  /** Reprend là où le joueur s'est arrêté plutôt qu'au premier niveau. */
+  const resumeCampaign = (): void => {
+    const next = ids.findIndex((id) => bestMoves(progress, id) === null)
+    openCampaign(next === -1 ? 0 : next)
   }
 
   const openRandom = (): void => {
@@ -145,10 +229,12 @@ export function start(elements: Elements): void {
     })
   })
 
-  document.querySelector('#play-campaign')?.addEventListener('click', () => openCampaign(0))
+  document.querySelector('#play-campaign')?.addEventListener('click', resumeCampaign)
   document.querySelector('#play-random')?.addEventListener('click', openRandom)
   document.querySelector('#restart')?.addEventListener('click', () => {
+    pourer.finish()
     session?.restart()
+    recordedFor = null
     refresh()
   })
   document.querySelector('#back')?.addEventListener('click', () => {
@@ -174,14 +260,22 @@ export function start(elements: Elements): void {
 
   const list = document.querySelector('#campaign-list')
   if (list) {
-    campaign.forEach((spec, index) => {
+    campaign.forEach((_spec, index) => {
       const button = document.createElement('button')
       button.type = 'button'
       button.className = 'chip'
-      button.textContent = String(index + 1)
-      button.title = spec.par === undefined ? spec.id : `${spec.id} — par ${spec.par}`
+
+      const number = document.createElement('span')
+      number.textContent = String(index + 1)
+      const marks = document.createElement('span')
+      marks.className = 'chip__stars'
+      button.append(number, marks)
+
       button.addEventListener('click', () => openCampaign(index))
       list.append(button)
+      chips.set(index, button)
     })
   }
+
+  refreshHome()
 }

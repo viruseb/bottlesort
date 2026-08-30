@@ -53,5 +53,9 @@ s'il est intéressant.
 
 ## État
 
-Le jeu est jouable : campagne de huit niveaux et génération aléatoire dans le navigateur.
-L'habillage reste sommaire — l'animation de versement et la finition visuelle viennent ensuite.
+Le jeu est jouable de bout en bout : campagne de huit niveaux avec déverrouillage progressif,
+barème d'étoiles et sauvegarde locale, génération aléatoire dans le navigateur, animation de
+versement et mode motifs pour l'accessibilité.
+
+Reste à faire : étoffer le jeu de niveaux — les préréglages `moyen` et `difficile` du générateur
+ne sont pas encore éprouvés — et brancher le workflow de génération en CI.

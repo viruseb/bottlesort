@@ -297,3 +297,14 @@ h1 { margin: 0 0 .5rem; font-size: clamp(2.2rem, 10vw, 3.2rem); letter-spacing: 
   from { transform: scaleY(0); }
   to { transform: scaleY(1); }
 }
+
+/* --- Progression --- */
+
+.score { margin: 0 auto .75rem; text-align: center; font-size: 1.1rem; letter-spacing: .1em; }
+.score__detail { display: block; margin-top: .15rem; color: var(--muted); font-size: .8rem; letter-spacing: normal; }
+
+.chip { position: relative; display: grid; gap: .1rem; justify-items: center; }
+.chip__stars { font-size: .6rem; line-height: 1; color: var(--liquid-orange); letter-spacing: .05em; }
+.chip:disabled { opacity: .4; cursor: default; }
+.chip:disabled:hover { background: var(--glass); }
+.chip.is-done { box-shadow: inset 0 0 0 1px var(--liquid-green); }
