@@ -1,0 +1,32 @@
+{
+  "id": "facile-003",
+  "palette": [
+    "orange",
+    "green",
+    "blue"
+  ],
+  "standardCapacity": 4,
+  "collector": {
+    "capacity": 8,
+    "color": 0,
+    "content": ""
+  },
+  "bottles": [
+    "1",
+    "2201",
+    "0020",
+    "001",
+    "0021"
+  ],
+  "seed": 20260833,
+  "generator": "1.0.0",
+  "par": 8,
+  "parIsOptimal": true,
+  "metrics": {
+    "collectBlocks": 5,
+    "collectSurfaced": 1,
+    "freeSpace": 4,
+    "burial": 1.17,
+    "greedyFails": false
+  }
+}

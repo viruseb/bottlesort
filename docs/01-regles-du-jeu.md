@@ -350,6 +350,12 @@ de collecte, qui en marche avant se viderait aussitôt. Deux conséquences :
   dans l'état, une bouteille bouchée par la marche arrière deviendrait une source illégale en
   marche avant, et le niveau produit serait insoluble tout en paraissant valide.
 
+**Troisième piège, découvert à l'implémentation : la marche arrière consomme l'espace libre.**
+Sortir des unités du collecteur les fait atterrir dans les bouteilles standard, et rien ne les
+en fait ressortir. Sans garde-fou, un mélange un peu long produit des plateaux saturés que la
+contrainte V2 rejette — après coup, donc en pure perte. Le filtre doit être appliqué **pendant**
+la marche : un pas arrière qui ferait tomber l'espace libre sous `C` est écarté.
+
 ### 6.3.2 Le nombre de coups mélangés n'est pas la difficulté
 
 La longueur de la marche arrière est un **majorant** de la longueur de solution, pas une mesure.
@@ -372,16 +378,32 @@ donc ennuyeux. Quatre mesures, toutes calculables avec le solveur :
 | **Échec du glouton** | Faire jouer un agent qui choisit toujours le coup rassemblant le plus d'unités. | Le glouton doit **échouer** là où le solveur réussit. C'est la signature d'un niveau mémorable : la stratégie évidente mène dans le mur. |
 | **Congestion** | Espace libre disponible au fil de la solution. | Doit passer par un creux : le moment où le plateau est le plus saturé est le cœur du niveau. |
 
+**L'ordre des filtres décide du coût de la génération.** Une partie gloutonne coûte quelques
+millisecondes, une recherche complète plusieurs secondes. Enchaîner solveur puis glouton fait
+tourner la recherche sur des candidats voués au rejet et gaspille l'essentiel du temps. L'ordre
+est donc : mesures bon marché, puis glouton, puis solveur en dernier.
+
 ### 6.3.4 Où se joue réellement l'intérêt : la couleur de collecte
 
-Le collecteur **n'apporte aucune profondeur de décision**. Y verser la couleur de collecte est
-toujours au moins aussi bon que n'importe quel autre coup (c'est un puits monotone, §9) : il n'y
-a donc jamais de dilemme à son sujet, et un solveur peut même jouer ce coup d'office.
+**Correction (lot 2).** J'ai d'abord écrit ici que le collecteur n'apportait aucune profondeur
+de décision, en raisonnant qu'y verser la couleur de collecte était toujours au moins aussi bon
+que n'importe quel autre coup. **C'est faux, et deux contre-exemples trouvés en test le
+montrent.**
 
-Ce que le collecteur apporte est de la **congestion** : ses `K = 16` unités saturent le plateau
-au départ, enterrent les autres couleurs, et libèrent des bouteilles au compte-gouttes. L'intérêt
-d'un niveau ne se joue donc pas *sur* le collecteur, mais sur **la façon dont sa couleur est
-répartie et sur ce qu'elle recouvre**.
+Le transfert automatique est **gratuit** : compléter une bouteille de la couleur de collecte
+expédie `C` unités sans dépenser de coup. Verser tout de suite dans le collecteur prive de cette
+économie. Une bouteille portant déjà trois unités de collecte n'attend qu'une quatrième pour
+partir sans rien coûter. Le collecteur crée donc une **vraie décision tactique** : expédier
+maintenant, ou compléter une bouteille et expédier gratuitement.
+
+Un solveur qui jouerait ce coup d'office s'en trouve doublement puni : il rend des solutions
+plus longues qu'il croit optimales, et sur un plateau très contraint il se prive de tout
+successeur et conclut à tort à l'insolubilité.
+
+Le collecteur apporte en outre de la **congestion** : ses `K = 16` unités saturent le plateau au
+départ, enterrent les autres couleurs, et libèrent des bouteilles au compte-gouttes. L'intérêt
+d'un niveau se joue donc sur **la façon dont sa couleur est répartie et sur ce qu'elle
+recouvre**, autant que sur le rythme des expéditions.
 
 D'où la règle de génération la plus importante :
 
@@ -552,16 +574,25 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
 - **Fonction successeur** : appliquer le coup **puis** la phase de résolution (§4) — bouchon et
   transfert automatique font partie de la transition, pas d'un état intermédiaire. Un état du
   graphe est donc toujours un état « stabilisé ».
-- **Heuristique admissible** : `sum over c of max(0, blocs(c) - m_c)`, où `blocs(c)` est le
-  nombre de blocs contigus de la couleur `c` sur le plateau et `m_c` le nombre de bouteilles
-  qu'elle doit occuper à la fin (1 pour la couleur de collecte, son collecteur). Justification :
-  un versement réduit le nombre de blocs d'une couleur d'**au plus un** — il fusionne deux blocs
-  au mieux, et un versement vers une bouteille vide ou un versement partiel n'en supprime aucun.
-  L'état final compte exactement `m_c` blocs par couleur.
+- **Heuristique admissible**, somme de deux minorants portant sur des ensembles de coups
+  **disjoints** — un versement ne déplace qu'une seule couleur :
+  - couleurs ordinaires : `max(0, blocs(c) - m_c)`, un versement ne fusionnant au mieux qu'une
+    paire de blocs de la couleur versée ;
+  - couleur de collecte : **la moitié** du nombre de blocs restés hors du collecteur, arrondie
+    au supérieur.
 
-  ⚠️ La formule naïve `sum(blocs(c) - 1)` — correcte quand chaque couleur tient dans une seule
-  bouteille — **surestime** ici le coût restant et rend la recherche inadmissible : elle
-  retournerait des solutions non optimales en les croyant optimales.
+  ⚠️ Deux pièges, tous deux vérifiés par l'expérience. La formule naïve `sum(blocs(c) - 1)`
+  suppose une bouteille par couleur et surestime le coût dès qu'une couleur en occupe
+  plusieurs. Et le facteur deux sur la couleur de collecte n'est pas de la prudence : un
+  versement peut résorber **deux** blocs d'un coup, en vidant celui de la source et en
+  déclenchant le transfert automatique de la destination. Sans ce facteur, la recherche rend
+  des solutions non optimales en les croyant optimales — un `par` faux, et rien pour le
+  signaler.
+- **Déduplication des coups équivalents** : les bouteilles standard de même contenu étant
+  interchangeables, un seul représentant par classe suffit. ⚠️ Quand source et destination
+  appartiennent à la **même** classe, il faut deux bouteilles distinctes de cette classe :
+  verser une bouteille dans sa jumelle est un coup réel, pas une permutation. L'oublier rend
+  insolubles les niveaux qui se terminent en fusionnant deux bouteilles à demi remplies.
 - **Élagage propre au collecteur** : verser la couleur de collecte vers le collecteur ne réduit
   jamais les possibilités (le collecteur est un puits monotone, invariant I4). Quand un tel coup
   est disponible, il est toujours au moins aussi bon que les autres : on peut le jouer
@@ -572,14 +603,22 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
   qu'une couleur, son état se résume à un entier — son remplissage. Clé d'état :
   `(remplissage_collecteur, contenus_standard_triés)`.
 - Limites de temps / nœuds explorés, avec repli sur une solution non optimale si dépassement.
-- **Passage à l'échelle — à vérifier tôt.** Un plateau type (une trentaine de bouteilles, ~76
-  unités, une couleur sur 3 ou 4 bouteilles) engendre un espace d'états très supérieur à celui
-  d'un Water Sort où chaque couleur tient dans un tube. Prouver l'optimalité peut devenir hors
-  de portée. Position retenue : mesurer avant de promettre, et si l'optimalité n'est pas
-  atteignable dans un budget raisonnable, publier le `par` comme **meilleure solution connue**
-  plutôt que comme optimum — en le nommant ainsi dans le format de niveau. Les critères de
-  qualité (§6.3.3) restent valables sur une borne supérieure, à condition de ne pas la confondre
-  avec l'optimum.
+- **Passage à l'échelle — mesuré (lot 2).** Sur `scripts/measure.ts` :
+
+  | Plateau | Recherche exhaustive | Faisceau |
+  |---|---|---|
+  | 2 couleurs, 4 bouteilles | 7 coups, optimal prouvé, 17 nœuds | 7 coups |
+  | 3 couleurs, 8 bouteilles | 13 coups, optimal prouvé, 15 nœuds | 13 coups |
+  | 4 couleurs, 14 bouteilles | **échec** après 10 s | 21 coups, 0,3 s |
+  | 4 couleurs, 30 bouteilles | **échec** après 10 s | 53 coups, 7 s |
+
+  La conclusion est nette : **l'optimalité n'est prouvable qu'en deçà d'une dizaine de
+  bouteilles.** Au-delà, on publie le `par` comme **meilleure solution connue**, marqué
+  `parIsOptimal: false` dans le fichier de niveau. Il ne faut jamais présenter une borne
+  supérieure comme un optimum.
+- **Recherche en faisceau** pour les grands plateaux : à chaque profondeur, on ne garde que les
+  `width` meilleurs états. Elle ne prouve rien, mais la solvabilité est déjà acquise par
+  construction chez le générateur (§6.3) — le solveur ne sert qu'à **mesurer**.
 
 ---
 

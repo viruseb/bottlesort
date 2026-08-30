@@ -124,10 +124,16 @@ export function isWon(state: GameState): boolean {
  * remplissage.
  */
 export function canonicalKey(state: GameState): string {
-  const standard = state.bottles
-    .filter((_, index) => index !== COLLECTOR)
-    .map((bottle) => bottle.content.join(','))
-    .sort()
+  const standard: string[] = []
+  for (let index = 0; index < state.bottles.length; index += 1) {
+    if (index === COLLECTOR) continue
+    // Une couleur par caractère : la clé est calculée à chaque nœud exploré,
+    // c'est le point chaud de la recherche.
+    let encoded = ''
+    for (const color of state.bottles[index]!.content) encoded += String.fromCharCode(48 + color)
+    standard.push(encoded)
+  }
+  standard.sort()
   return `${state.bottles[COLLECTOR]?.content.length ?? 0}|${standard.join('/')}`
 }
 
