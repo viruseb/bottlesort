@@ -44,7 +44,9 @@ locale et une génération en CI produisent le même résultat.
 
 ```sh
 npm run levels:gen -- --preset facile --count 8 --seed 20260830
-npm run measure   # passage à l'échelle du solveur
+npm run measure     # passage à l'échelle du solveur
+npm run audit:par   # recalcule chaque par par un BFS nu et le compare au par publié
+npm run solutions   # solutions optimales, pour rejouer un niveau de bout en bout
 ```
 
 La solvabilité est acquise par construction : la génération part de l'état résolu et remonte par

@@ -13,7 +13,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "levels:gen": "vite-node scripts/gen-levels.ts",
-    "measure": "vite-node scripts/measure.ts"
+    "measure": "vite-node scripts/measure.ts",
+    "audit:par": "vite-node scripts/audit-par.ts",
+    "solutions": "vite-node scripts/solutions.ts"
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
