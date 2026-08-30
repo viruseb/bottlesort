@@ -164,10 +164,10 @@ h1 { margin: 0 0 .5rem; font-size: clamp(2.2rem, 10vw, 3.2rem); letter-spacing: 
   display: flex;
   flex-direction: column-reverse;
 }
-.layer {
-  flex: 0 0 var(--unit);
-  animation: pour .18s ease-out;
-}
+.layer { flex: 0 0 var(--unit); }
+/* Seules les couches qui viennent d'être versées s'animent : animer toutes les
+   couches à chaque rendu produisait un clignotement à chaque appui. */
+.layer--new { animation: pour .18s ease-out; }
 @keyframes pour {
   from { flex-basis: 0; opacity: .4; }
   to { flex-basis: var(--unit); opacity: 1; }
@@ -192,5 +192,5 @@ h1 { margin: 0 0 .5rem; font-size: clamp(2.2rem, 10vw, 3.2rem); letter-spacing: 
 .bottle--collector { width: 3rem; --unit: .85rem; }
 
 @media (prefers-reduced-motion: reduce) {
-  .bottle, .layer { transition: none; animation: none; }
+  .bottle, .layer, .layer--new { transition: none; animation: none; }
 }
