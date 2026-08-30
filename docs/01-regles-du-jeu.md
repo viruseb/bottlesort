@@ -58,8 +58,8 @@ Caractéristiques du jeu :
 Level {
   colors        : liste des couleurs utilisées
   bottles       : liste de Bottle        // l'ordre définit la position à l'écran
-  collectorId   : id de la bouteille collecteur
-  collectColor  : Color                  // couleur associée au collecteur
+  collectorId   : id de la bouteille collecteur   // toujours present, exactement un
+  collectColor  : Color                  // couleur associée au collecteur, explicite
 }
 
 Bottle {
@@ -106,11 +106,13 @@ Le coup est **légal** si et seulement si **toutes** les conditions suivantes so
    jamais (invariant I4).
 
 Le collecteur **est** en revanche une destination manuelle valide : le joueur peut y verser
-directement depuis une bouteille standard, sans attendre d'en avoir rempli une entièrement. La
-condition 5 s'y applique normalement, ce qui revient — le collecteur ne contenant jamais que la
-couleur de collecte — à n'accepter que celle-ci. `[À CONFIRMER]` Lorsque le collecteur démarre
-**vide**, la condition 5 laisserait passer n'importe quelle couleur : il faut alors la
-restreindre explicitement à `collectColor`.
+directement depuis une bouteille standard, sans attendre d'en avoir rempli une entièrement.
+
+**Le collecteur n'accepte que `collectColor`**, y compris lorsqu'il démarre vide. La condition 5
+ne suffit pas à le garantir dans ce cas (un collecteur vide accepterait n'importe quoi) : la
+restriction est donc **explicite** dans le moteur, et non déduite du contenu. Corollaire pour le
+rendu : la couleur de collecte doit être lisible sur un collecteur vide — teinte du verre,
+pastille au pied ou liseré. Sans ce repère, le joueur découvre la contrainte par essai-erreur.
 
 Un coup illégal est refusé sans modifier l'état (et sans consommer de coup, ni d'annulation).
 
@@ -134,14 +136,18 @@ q = min(n, f)
 Retirer `q` unités du sommet de `source`, empiler `q` unités de cette couleur au sommet de
 `destination`. Puis appliquer la règle de complétion (§4).
 
-### 3.4 Restriction « versement inutile » `[À CONFIRMER]`
+### 3.4 Versement d'une monochrome vers une bouteille vide — **autorisé**
 
-Proposition : interdire (ou au minimum ne pas compter comme un coup) le transvasement d'une
-bouteille **monochrome vers une bouteille vide**, qui ne fait que déplacer le problème et
-pollue l'historique. Deux options :
+Déplacer une bouteille monochrome vers une bouteille vide est **permis**. La règle reste pure :
+aucun cas particulier, aucune exception à expliquer au joueur.
 
-- **A** — l'autoriser (règle pure, plus permissive) ;
-- **B** — l'interdire (anti-frustration, évite les boucles d'annulation stériles). **Recommandé.**
+Ce choix ne coûte rien au solveur. Toutes les bouteilles standard ayant la même capacité `C`,
+un tel coup produit un état **identique après canonisation** (§9) : le multiensemble des
+contenus est inchangé, seules deux bouteilles ont échangé leur rôle. C'est donc une boucle sur
+elle-même dans le graphe de recherche, éliminée d'office sans traitement particulier.
+
+Conséquence côté joueur en revanche : ce coup consomme un coup au compteur sans faire avancer le
+puzzle. Le compteur affiché mesure les actions, pas les progrès.
 
 ---
 
@@ -225,15 +231,22 @@ puisque toutes ses unités doivent s'y trouver.
 
 ### 5.2 Blocage (défaite douce)
 
-Il n'y a pas de défaite : la partie est **bloquée** quand aucun coup légal ne modifie l'état de
-façon utile. Détection : aucun couple `(i, j)` ne satisfait §3.1 (en excluant les coups exclus
-par §3.4). Le jeu propose alors : **annuler**, **recommencer**, ou **ajouter une bouteille**
-(§7.3).
+Il n'y a pas de défaite au sens strict : la partie est **bloquée** quand plus aucun coup ne fait
+progresser le puzzle.
 
-`[À CONFIRMER]` Faut-il détecter aussi les positions *légales mais insolubles* (coups encore
-possibles mais victoire hors d'atteinte) ? Cela demande un solveur complet à l'exécution ;
-proposition : le faire **hors ligne** à la génération, et à l'exécution seulement en option
-« assistance » (grisage des coups perdants).
+Attention à la définition. Le versement d'une monochrome vers une bouteille vide étant autorisé
+(§3.4), « aucun coup légal disponible » ne se produit presque jamais : il reste presque toujours
+un brassage stérile à jouer. Le critère correct est donc : **aucun coup légal ne change l'état
+canonique** (§9) — autrement dit tous les coups possibles se réduisent à des permutations de
+bouteilles. C'est ce test qu'il faut implémenter, pas le simple comptage de coups légaux.
+
+Une fois bloqué, le seul recours en v1 est **recommencer** (§7.2) : ni annulation, ni bouteille
+de secours.
+
+`[À CONFIRMER]` Faut-il détecter aussi les positions *légales mais insolubles* — des coups
+utiles restent jouables, mais la victoire est déjà hors d'atteinte ? Cela demande un solveur
+complet à l'exécution. Proposition : vérification **hors ligne** à la génération, et à
+l'exécution uniquement si l'on ajoute plus tard un mode assistance.
 
 ---
 
@@ -340,26 +353,37 @@ Interaction en deux temps (*tap–tap*), pas de glisser-déposer :
 Pendant l'animation, les entrées sont ignorées ou mises en file `[À CONFIRMER]` — préférer la
 mise en file pour ne pas pénaliser le joueur rapide.
 
-### 7.2 Annuler (*undo*)
+### 7.2 Recommencer — seule action de secours en v1
 
-- Restaure exactement l'état précédent, y compris les bouchons.
-- Historique complet de la partie `[À CONFIRMER]` (vs. profondeur limitée / quota d'annulations
-  monétisé). Recommandé pour la version de base : **illimité**, un puzzle sans hasard n'a rien
-  à gagner à punir l'exploration.
-- **Recommencer** revient à l'état initial du niveau et vide l'historique.
+**Décision : la v1 est un puzzle pur.** Pas d'annulation, pas de bouteille de secours, pas
+d'indice. La seule action disponible est **recommencer**, qui remet le niveau à son état
+initial.
 
-### 7.3 Ajouter une bouteille
+Deux conséquences à assumer :
 
-Action de secours qui ajoute une bouteille **vide** au plateau. Elle modifie la difficulté du
-niveau et doit donc être limitée (une fois par niveau, ou via une récompense).
-`[À CONFIRMER]` : capacité de la bouteille ajoutée (fixe ? égale à la plus grande couleur
-restante ?) et interaction avec le décompte d'étoiles.
+- **L'erreur est définitive.** Un mauvais enchaînement se paie par une reprise du niveau depuis
+  le début. Cela rend la qualité de la génération (§6.1, V4) et la longueur des niveaux
+  critiques : un niveau de 60 coups où l'on se bloque au 55ᵉ est une punition, pas un défi.
+  Calibrer la longueur en conséquence, quitte à viser court et nerveux.
+- **La détection de blocage devient une fonctionnalité de premier plan** (§5.2). Sans annulation,
+  le joueur doit être averti immédiatement qu'il est bloqué, plutôt que de chercher en vain un
+  coup qui n'existe plus.
 
-### 7.4 Indice (*hint*)
+**Le moteur conserve malgré tout l'historique complet des coups en mémoire.** Il est gratuit à
+maintenir, indispensable aux tests et au rejeu, et il permettra d'activer l'annulation plus tard
+sans retoucher le cœur du jeu. C'est une décision de produit, pas une contrainte technique — le
+moteur reste prêt.
 
-Propose le prochain coup d'une solution optimale calculée par le solveur. Nécessite que le
-solveur tourne sur l'état **courant**, pas seulement sur l'état initial — donc un solveur
-suffisamment rapide (§9).
+### 7.3 Hors v1 : annulation, bouteille de secours, indice
+
+Conservés ici pour mémoire, à réévaluer une fois la v1 jouable :
+
+- **Annuler** — restaurerait l'état exact précédent, bouchons et transferts automatiques compris
+  (§4.5), un coup et sa résolution formant une seule entrée d'historique.
+- **Ajouter une bouteille** — ajouterait une bouteille standard vide au plateau. Modifie la
+  difficulté du niveau, donc à limiter et à articuler avec le barème.
+- **Indice** — proposerait le prochain coup d'une solution optimale. Impose un solveur capable de
+  tourner sur l'état **courant** et pas seulement à la génération (§9).
 
 ---
 
@@ -401,24 +425,34 @@ le calcul du `par`, les indices (§7.4) et les tests de non-régression.
 
 ---
 
-## 10. Décisions à trancher (récapitulatif)
+## 10. Décisions
+
+### 10.1 Actées
+
+| # | Question | Réf. | Décision |
+|---|---|---|---|
+| D1 | Versement d'une monochrome vers une bouteille vide | §3.4 | **Autorisé** — règle pure, sans coût pour le solveur |
+| D2 | Une bouteille monochrome non pleine est-elle bouchée ? | §4.1 | Non |
+| D3 | Le collecteur peut-il être **source** ? | §3.1 | Non — c'est un puits (I4) |
+| D4 | Couleur acceptée par un collecteur vide | §3.1 | `collectColor` uniquement, restriction explicite et signalée visuellement |
+| D5 | Nombre de collecteurs par niveau | §2.1 | **Exactement un**, toujours présent |
+| D6 | Le transfert automatique compte-t-il dans les coups / le `par` ? | §4 | Non |
+| D7 | Aides du joueur en v1 | §7.2 | **Aucune** — puzzle pur, `recommencer` seul recours ; l'historique reste tenu en mémoire |
+| D8 | Le bouchon est-il réversible en cas d'annulation ? | §4.5 | Oui — sans objet en v1, à respecter si l'annulation arrive |
+| D9 | Détection des positions insolubles | §5.2 | Hors ligne, à la génération |
+
+### 10.2 Encore ouvertes
 
 | # | Question | Réf. | Proposition |
 |---|---|---|---|
-| Q1 | Interdire le versement monochrome → bouteille vide ? | §3.4 | Oui (option B) |
-| Q2 | Une bouteille monochrome non pleine est-elle bouchée ? | §4 | Non |
-| Q3 | Le bouchon est-il réversible par *undo* ? | §4 | Oui |
-| Q4 | Détecter à l'exécution les positions insolubles ? | §5.2 | Hors ligne + option d'assistance |
-| Q5 | Comportement en cas de destination invalide (sélection conservée ?) | §7.1 | Conservée |
-| Q6 | Entrées mises en file pendant l'animation ? | §7.1 | Oui |
-| Q7 | *Undo* illimité ou limité ? | §7.2 | Illimité en v1 |
-| Q8 | Capacité et coût de la bouteille ajoutée | §7.3 | À définir |
-| Q9 | Barème d'étoiles / progression / méta-jeu | — | Hors périmètre v1 |
-| Q10 | Le collecteur peut-il être **source** d'un versement ? | §3.1 | Non — c'est un puits (I4) |
-| Q11 | Collecteur démarrant **vide** : accepte-t-il n'importe quelle couleur, ou seulement `collectColor` ? | §3.1 | Seulement `collectColor`, restriction explicite |
-| Q12 | `K = 16` et `C = 4` sont-ils constants sur tous les niveaux, ou variables selon la difficulté ? | §6.1 | Paramètres de niveau, `K = 16` par défaut |
-| Q13 | Un niveau peut-il avoir **plusieurs** collecteurs, ou zéro ? | §2.1 | Exactement un en v1 |
-| Q14 | Le transfert automatique compte-t-il dans le nombre de coups affiché / le `par` ? | §4 | Non |
+| Q1 | `K = 16` et `C = 4` sont-ils constants, ou variables selon la difficulté ? | §6.1 | Paramètres de niveau, `K = 16` par défaut |
+| Q2 | Comportement sur destination invalide : la sélection est-elle conservée ? | §7.1 | Conservée |
+| Q3 | Entrées mises en file pendant l'animation ? | §7.1 | Oui, pour ne pas pénaliser le joueur rapide |
+| Q4 | Longueur cible d'un niveau — décisive sans annulation (§7.2) | §6.2 | À calibrer par playtest |
+| Q5 | Barème d'étoiles, progression, méta-jeu | — | Hors périmètre v1 |
+
+Aucune de ces questions ne bloque le démarrage de l'implémentation : ce sont des réglages
+(Q1, Q4), des détails d'interaction à éprouver au doigt (Q2, Q3) ou du hors-périmètre (Q5).
 
 ---
 
