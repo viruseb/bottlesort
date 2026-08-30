@@ -1,10 +1,11 @@
 # Défi entre amis et classement — spécification
 
-> Statut : **spécification fonctionnelle v0.2** — document de conception, aucun code.
+> Statut : **spécification fonctionnelle v0.3** — document de conception, aucun code.
 > Toute décision marquée `[À CONFIRMER]` doit être tranchée avant l'implémentation.
 >
-> La v0.1 proposait de faire voyager le classement dans les liens eux-mêmes, sans serveur. Cette
-> piste est **abandonnée** : voir §2.
+> - v0.1 : classement porté par les liens, sans serveur. **Abandonné** (§2).
+> - v0.2 : Cloudflare Workers + KV. **Abandonné** — KV est le mauvais outil (§3.1), et le compte
+>   AWS déjà en place enlève l'argument principal en faveur de Cloudflare.
 
 ---
 
@@ -42,27 +43,60 @@ GitHub.** GitHub reste l'hébergeur du site et le déclencheur du déploiement �
 
 ---
 
-## 3. Le choix : Cloudflare Workers + KV
+## 3. Le choix : AWS Lambda + DynamoDB
 
-| Option | Pour | Contre |
-|---|---|---|
-| **Cloudflare Workers + KV** | Un seul fichier, aucun serveur à administrer, offre gratuite très au-delà du besoin, déployable depuis le workflow GitHub existant, CORS trivial, latence faible partout | Un compte Cloudflare à créer |
-| Supabase | Base Postgres, API REST générée, authentification incluse | Clé publique dans le client, sécurité entièrement portée par les politiques d'accès ; projet gratuit mis en veille après inactivité — pénible pour un jeu utilisé par à-coups ; une base à modéliser pour trois colonnes |
-| Firebase | Mature, temps réel | Même modèle de clé publique, SDK lourd dans le bundle, compte Google |
-| Deno Deploy / Val Town | Aussi simples que Workers | Écosystème plus étroit, offres gratuites plus mouvantes |
-| Netlify / Vercel Functions | Fonctions serverless classiques | Suppose de déplacer l'hébergement, ou d'en gérer deux |
+Deux briques, pas une de plus :
 
-**Recommandation : Cloudflare Workers + KV.** Le classement est un petit JSON par niveau ; il n'y
-a rien à modéliser, rien à administrer, et le tout tient dans un fichier vivant dans ce dépôt. Ce
-n'est pas une base de données déguisée en jeu, c'est trois routes.
+- **Lambda avec une Function URL.** Pas d'API Gateway. Une Function URL expose directement la
+  fonction en HTTPS, avec CORS configurable et sans facturation propre. API Gateway alourdit le
+  montage et sa gratuité s'arrête au bout de douze mois, contrairement au million de requêtes
+  Lambda mensuelles, gratuit sans limite de durée.
+- **DynamoDB** pour le stockage, avec **écriture conditionnelle** (§3.1).
 
-À ce jour, l'offre gratuite est de l'ordre de 100 000 requêtes par jour côté Worker et de
-100 000 lectures et 1 000 écritures par jour côté KV. Un groupe d'amis en consomme quelques
-dizaines. `[À CONFIRMER]` — vérifier les quotas en vigueur au moment de l'implémentation, ils
-bougent.
+La Lambda tourne sous Node : elle **importe le moteur du jeu tel quel**. C'est le bénéfice d'une
+contrainte posée au lot 1 — `src/engine/` est du TypeScript pur, sans référence au DOM. Aucune
+réimplémentation des règles côté serveur, donc aucune divergence possible entre ce que le jeu
+accepte et ce que le serveur valide.
 
-`[À CONFIRMER]` **D1 (SQLite) plutôt que KV** si l'on veut interroger autrement que par clé —
-par exemple un classement global tous niveaux confondus. KV suffit au besoin décrit.
+### 3.1 Pourquoi pas un magasin clé-valeur simple
+
+La v0.2 retenait Cloudflare KV. **C'était une erreur, et elle mérite d'être expliquée** parce
+qu'elle se reproduirait avec n'importe quel magasin clé-valeur nu.
+
+Mettre à jour un classement, c'est lire la liste, y insérer un score, trier, tronquer, réécrire.
+Un magasin clé-valeur n'offre aucune atomicité sur cette séquence : deux joueurs qui terminent le
+même puzzle en même temps lisent la même liste, et le second écrase le premier. **Un score
+disparaît, sans erreur et sans trace.** C'est rare à trois joueurs, mais c'est un défaut
+silencieux — la pire espèce.
+
+DynamoDB règle le problème en un seul appel :
+
+```
+PutItem  condition:  attribute_not_exists(pseudo) OR moves > :nouveauScore
+```
+
+Atomique, sans lecture préalable, sans course. La règle « le meilleur gagne » est portée par la
+base elle-même plutôt que par du code qui espère être seul à écrire.
+
+### 3.2 Ce qui a été écarté
+
+| Option | Écartée parce que |
+|---|---|
+| Cloudflare Workers + KV | KV ne sait pas faire d'écriture conditionnelle (§3.1) ; un compte de plus à créer |
+| Cloudflare Workers + D1 ou Durable Objects | Corrigerait le défaut, mais l'argument « rien à créer » ne tient plus face à un compte AWS existant |
+| Supabase | Clé publique dans le client, sécurité entièrement portée par les politiques d'accès ; projet gratuit mis en veille après inactivité — pénible pour un jeu utilisé par à-coups |
+| Firebase | Même modèle de clé publique, SDK lourd dans le bundle |
+| Lambda + API Gateway | API Gateway n'apporte rien ici et sa gratuité expire au bout d'un an |
+| EC2, Fargate, RDS | Un serveur ou une base à administrer et à payer en continu, pour trois routes |
+
+### 3.3 Coût
+
+L'offre gratuite **permanente** couvre très largement l'usage visé : le million de requêtes
+Lambda mensuelles et les 25 Go de DynamoDB n'ont pas de limite de durée. Un groupe d'amis en
+consomme quelques dizaines par semaine.
+
+`[À CONFIRMER]` Vérifier les offres en vigueur au moment de l'implémentation, elles bougent. Et
+**poser une alerte de facturation** : c'est bon marché tant que personne n'abuse (§10).
 
 ---
 
@@ -70,29 +104,33 @@ par exemple un classement global tous niveaux confondus. KV suffit au besoin dé
 
 ```
 Navigateur (GitHub Pages, statique)
-  |  GET  /r/:room/board          → le classement d'un salon
-  |  POST /r/:room/score          → soumettre un score, avec sa preuve
+  |  GET  ?room=…&level=…        → le classement d'un niveau dans un salon
+  |  POST { room, level, pseudo, moves }
   v
-Worker Cloudflare  ──  rejoue la partie sur le moteur  ──  KV
+Lambda (Function URL)  ──  rejoue la partie sur le moteur  ──  DynamoDB
 ```
-
-Le Worker **partage le moteur de règles du jeu**. C'est possible parce que `src/engine/` est du
-TypeScript pur, sans la moindre référence au DOM — une contrainte posée dès le lot 1 et qui paie
-ici : aucune réimplémentation des règles côté serveur, donc aucune divergence possible entre ce
-que le jeu accepte et ce que le serveur valide.
 
 ### 4.1 Salons
 
-Un **salon** (`room`) est un identifiant court et opaque partagé par un groupe d'amis, contenu
-dans le lien de défi. Trois raisons :
+Un **salon** est un identifiant court et opaque partagé par un groupe d'amis, contenu dans le
+lien de défi. Trois raisons :
 
 - le classement d'un groupe reste entre ses membres, plutôt que d'être noyé dans un classement
   mondial où l'on ne connaît personne ;
 - la surface d'abus est cloisonnée : polluer un salon ne pollue que lui ;
-- aucune inscription : appartenir au groupe, c'est avoir le lien.
+- aucune inscription — appartenir au groupe, c'est avoir le lien.
 
-Le salon est créé à la volée à la première soumission. Identifiant tiré au hasard, assez long
-pour ne pas se deviner (`[À CONFIRMER]` — 10 à 12 caractères).
+Créé à la volée à la première soumission, identifiant tiré au hasard, assez long pour ne pas se
+deviner `[À CONFIRMER]`.
+
+### 4.2 Déploiement
+
+Depuis le workflow GitHub Actions existant, via **OIDC** : GitHub s'authentifie auprès d'AWS par
+jeton éphémère. **Aucune clé d'accès longue durée ne doit être stockée en secret de dépôt** — une
+clé qui fuite reste valable jusqu'à révocation, un jeton OIDC expire en quelques minutes.
+
+`[À CONFIRMER]` Outil de description de l'infrastructure : SAM, CDK, Terraform ou simple appel
+d'API. Le montage est assez petit pour que le plus léger suffise.
 
 ---
 
@@ -169,21 +207,24 @@ client protège l'affichage, et aucun des deux ne doit dépendre de l'autre.
 
 ### 8.1 Modèle
 
-En KV, une entrée par salon et par niveau :
+Une ligne DynamoDB par score :
 
 ```
-clé   : room:<salon>:level:<clé de niveau>
-valeur: Entry[]        // les meilleurs, triés par coups croissants
-
-Entry {
-  pseudo : texte
-  moves  : entier
-  at     : horodatage   // départage les ex aequo
-}
+PK   : room#<salon>#level#<clé de niveau>
+SK   : <pseudo>
+moves: entier
+at   : horodatage        // départage les ex aequo
+ttl  : expiration        // ménage automatique des vieux salons
 ```
 
-Un seul score par couple (pseudo, niveau) : **le meilleur gagne**, à égalité le plus ancien.
-Seules les `N` premières entrées sont conservées `[À CONFIRMER]`.
+Une seule requête sur la clé de partition rend tous les scores d'un niveau ; le tri et la coupe
+au podium se font en mémoire, les listes étant courtes.
+
+Un seul score par couple (pseudo, niveau) : **le meilleur gagne**, garanti par l'écriture
+conditionnelle (§3.1) plutôt que par une lecture suivie d'une écriture.
+
+Le champ `ttl` laisse DynamoDB effacer seul les salons oubliés — pas de tâche de ménage à
+écrire, pas de stockage qui gonfle indéfiniment. `[À CONFIRMER]` — durée de rétention.
 
 Le client garde une **copie locale** du dernier classement reçu, avec la même lecture défensive
 que la progression solo (§12.3 des règles) : l'écran affiche toujours quelque chose, même hors
@@ -226,10 +267,14 @@ Une route d'écriture publique se fait spammer un jour ou l'autre. Sans authenti
 limite les dégâts plutôt que de prétendre les empêcher :
 
 - **rejeu obligatoire** — un score sans partie valide n'entre jamais ;
-- **plafond de taille** sur la charge utile ;
-- **limitation de débit** par adresse, via le mécanisme intégré de Cloudflare ;
+- **plafond de taille** sur la charge utile, refusée avant même d'être analysée ;
+- **concurrence réservée** sur la Lambda : même sous abus, la facture et la charge restent
+  bornées. C'est le garde-fou le plus important, parce qu'il plafonne le coût ;
+- **limitation de débit par adresse**, la Function URL exposant l'IP appelante ; un compteur à
+  courte expiration en DynamoDB suffit, sans recourir à un pare-feu applicatif payant ;
 - **cloisonnement par salon** — l'identifiant n'étant pas devinable, il faut le lien pour écrire ;
-- **plafond d'entrées par salon**, pour qu'un salon ne puisse pas grossir indéfiniment.
+- **plafond d'entrées par salon**, pour qu'un salon ne puisse pas grossir indéfiniment ;
+- **alerte de facturation**, pour être prévenu plutôt que surpris.
 
 `[À CONFIRMER]` Faut-il un moyen d'effacer une entrée ou un salon ? Sans compte, seul un secret
 d'administration côté Worker le permettrait.
@@ -242,9 +287,13 @@ Ce que le backend change, et qu'il faut assumer : **des données quittent désor
 Un pseudo choisi, un nombre de coups, une liste de coups, un horodatage. Ni adresse, ni compte,
 ni traceur, ni identifiant publicitaire — mais ce n'est plus « rien ne sort ».
 
-Deux conséquences : le stockage doit rester **minimal** (pas d'adresse IP conservée au-delà de la
-limitation de débit), et une phrase dans l'interface doit le dire au moment où le joueur saisit
-son pseudo, plutôt que dans une page que personne ne lit.
+Trois conséquences : le stockage reste **minimal** — aucune adresse IP conservée au-delà de la
+fenêtre de limitation de débit, qui expire d'elle-même ; les données ont une **durée de vie**
+(§8.1) plutôt que d'être gardées indéfiniment ; et une phrase dans l'interface le dit au moment
+où le joueur saisit son pseudo, plutôt que dans une page que personne ne lit.
+
+`[À CONFIRMER]` Région AWS — une région européenne garde les données au plus près des joueurs et
+simplifie la question.
 
 ---
 
@@ -281,6 +330,9 @@ amitiés persistantes.
 |---|---|---|---|
 | D1 | Classement porté par les liens ou par un serveur ? | §2 | **Un serveur.** Un classement qui n'avance pas au rafraîchissement n'est pas un classement |
 | D2 | GitHub peut-il héberger le backend ? | §2 | **Non.** Pages est statique, les Actions exigeraient un jeton public. GitHub reste l'hébergeur du site |
+| D7 | Hébergeur du backend | §3 | **AWS** — Lambda avec Function URL, sans API Gateway, plus DynamoDB |
+| D8 | Magasin de données | §3.1 | **DynamoDB avec écriture conditionnelle.** Un magasin clé-valeur nu perd silencieusement un score en cas d'écriture simultanée |
+| D9 | Authentification du déploiement | §4.2 | **OIDC**, jamais de clé d'accès longue durée en secret de dépôt |
 | D3 | Podium | §8.2 | **Or, argent, bronze** |
 | D4 | Contenu du lien | §5 | Le puzzle lui-même et le salon. Ni graine, ni scores |
 | D5 | Confiance dans les scores | §6 | Aucune : rejeu obligatoire côté serveur |
@@ -290,10 +342,13 @@ amitiés persistantes.
 
 | # | Question | Réf. | Proposition |
 |---|---|---|---|
-| Q1 | Cloudflare Workers + KV, ou un autre hébergeur ? | §3 | Workers + KV |
-| Q2 | KV ou D1 ? | §3 | KV, sauf besoin de classement transversal |
+| Q1 | Région AWS | §11 | Une région européenne |
+| Q2 | Outil d'infrastructure : SAM, CDK, Terraform ou appel d'API direct ? | §4.2 | Le plus léger qui fasse l'affaire |
 | Q3 | Longueur de l'identifiant de salon | §4.1 | 10 à 12 caractères |
-| Q4 | Nombre d'entrées conservées par niveau | §8.1 | À calibrer |
-| Q5 | Effacement d'une entrée ou d'un salon | §10 | À définir |
-| Q6 | Pseudo demandé à l'arrivée ou à la victoire ? | §7 | À l'arrivée |
-| Q7 | Un défi peut-il porter sur un niveau de campagne ? | §5 | Oui, seule la clé diffère |
+| Q4 | Nombre d'entrées conservées par niveau | §8.1 | Le podium plus quelques suivants, à calibrer |
+| Q5 | Durée de rétention (`ttl`) d'un salon | §8.1 | À définir — quelques mois d'inactivité |
+| Q6 | Effacement d'une entrée ou d'un salon à la demande | §10 | Sans compte, exigerait un secret d'administration |
+| Q7 | Pseudo demandé à l'arrivée ou à la victoire ? | §7 | À l'arrivée, comme demandé |
+| Q8 | Un défi peut-il porter sur un niveau de campagne ? | §5 | Oui, seule la clé diffère |
+| Q9 | Suffixe aléatoire pour lever les homonymes dans un salon ? | §12 | Oui, affiché seulement en cas de collision |
+| Q10 | Seuils de limitation de débit et concurrence réservée | §10 | À calibrer, prudents au départ |
