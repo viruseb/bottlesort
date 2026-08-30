@@ -1,53 +1,196 @@
 :root {
   --bg: #454f80;
+  --bg-deep: #3a4270;
   --ink: #eef1fb;
   --muted: #aab2d8;
-  --orange: #f07216;
-  --green: #34a83a;
-  --blue: #1f86c8;
-  --dark: #2b2f45;
-  --white: #f2f4fb;
+  --glass: rgba(255, 255, 255, .08);
+  --rim: rgba(255, 255, 255, .22);
+
+  --liquid-orange: #f07216;
+  --liquid-green: #34a83a;
+  --liquid-blue: #1f86c8;
+  --liquid-dark: #2b2f45;
+  --liquid-white: #eef1fb;
+
+  --bottle-width: 2.5rem;
+  --unit: 1.35rem;
 }
+
 * { box-sizing: border-box; }
+
+/* Les règles de mise en page ci-dessous posent des `display` explicites, qui
+   l'emporteraient sinon sur le `display: none` implicite de l'attribut. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   min-height: 100svh;
-  display: grid;
-  place-items: center;
-  padding: 2rem 1.25rem;
   background: var(--bg);
   color: var(--ink);
-  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  text-align: center;
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
 }
-main { max-width: 32rem; }
-h1 { margin: 0 0 .25rem; font-size: clamp(2rem, 9vw, 3rem); letter-spacing: -.02em; }
-.tag {
-  margin: 0 0 2rem;
+
+.screen { padding: 1.25rem; max-width: 60rem; margin: 0 auto; }
+.screen--game { display: flex; flex-direction: column; min-height: 100svh; }
+
+/* --- Accueil --- */
+
+.screen--home { text-align: center; padding-top: 3rem; }
+h1 { margin: 0 0 .5rem; font-size: clamp(2.2rem, 10vw, 3.2rem); letter-spacing: -.02em; }
+.tagline { margin: 0 auto 2.5rem; max-width: 26rem; color: var(--muted); }
+
+.modes { display: grid; gap: .75rem; max-width: 24rem; margin: 0 auto 2.5rem; }
+.mode {
+  display: grid;
+  gap: .15rem;
+  padding: 1rem 1.25rem;
+  border: 0;
+  border-radius: .9rem;
+  background: var(--liquid-orange);
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mode strong { font-size: 1.1rem; }
+.mode span { font-size: .875rem; opacity: .85; }
+.mode--secondary { background: var(--glass); box-shadow: inset 0 0 0 1px var(--rim); color: var(--ink); }
+
+.campaign__label {
+  margin: 0 0 .5rem;
   color: var(--muted);
-  font-size: .95rem;
+  font-size: .8rem;
   text-transform: uppercase;
   letter-spacing: .12em;
 }
-.bottles {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: .75rem;
-  margin: 0 0 2rem;
+.campaign__list { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; }
+.chip {
+  min-width: 2.4rem;
+  padding: .45rem .6rem;
+  border: 0;
+  border-radius: .55rem;
+  background: var(--glass);
+  box-shadow: inset 0 0 0 1px var(--rim);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
 }
+.chip:hover { background: rgba(255, 255, 255, .16); }
+
+/* --- Partie --- */
+
+.bar { display: flex; align-items: center; gap: .75rem; margin-bottom: .75rem; }
+.bar__title { flex: 1; text-align: center; color: var(--muted); font-size: .9rem; }
+.ghost {
+  padding: .45rem .7rem;
+  border: 0;
+  border-radius: .55rem;
+  background: var(--glass);
+  box-shadow: inset 0 0 0 1px var(--rim);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.primary {
+  display: block;
+  margin: 0 auto .75rem;
+  padding: .6rem 1.4rem;
+  border: 0;
+  border-radius: .7rem;
+  background: var(--liquid-orange);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.status { margin: 0 0 .5rem; text-align: center; color: var(--muted); font-size: .875rem; }
+
+.banner {
+  margin: 0 auto .75rem;
+  padding: .6rem 1rem;
+  max-width: 30rem;
+  border-radius: .7rem;
+  text-align: center;
+  font-size: .9rem;
+}
+.banner--won { background: rgba(52, 168, 58, .22); box-shadow: inset 0 0 0 1px var(--liquid-green); }
+.banner--blocked { background: rgba(240, 114, 22, .18); box-shadow: inset 0 0 0 1px var(--liquid-orange); }
+
+/* --- Plateau --- */
+
+.board {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 1rem;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 3rem;
+}
+.board__collector { flex: 0 0 auto; }
+.board__shelf {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: .7rem .5rem;
+  /* `min-width: 0` est indispensable : sans lui, un élément flex refuse de
+     passer sous sa largeur de contenu et pousse le collecteur hors de l'écran. */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 30rem;
+  justify-content: center;
+}
+
 .bottle {
-  width: 2.25rem;
-  border-radius: .4rem .4rem .6rem .6rem;
-  background: rgba(255, 255, 255, .07);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15);
+  position: relative;
+  width: var(--bottle-width);
+  height: calc(var(--capacity) * var(--unit));
+  padding: 0;
+  border: 0;
+  border-radius: .35rem .35rem .7rem .7rem;
+  background: var(--glass);
+  box-shadow: inset 0 0 0 1px var(--rim);
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease;
   overflow: hidden;
+}
+.bottle:disabled { cursor: default; opacity: .75; }
+.bottle.is-selected { transform: translateY(-.6rem); box-shadow: inset 0 0 0 2px #fff; }
+.bottle.is-corked { box-shadow: inset 0 0 0 1px var(--rim), 0 0 0 3px rgba(193, 137, 62, .9); }
+
+.bottle__liquid {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column-reverse;
 }
-.bottle--collector { height: 12rem; }
-.bottle--standard { height: 6rem; }
-.layer { flex: 1 0 25%; }
-.bottle--collector .layer { flex-basis: 12.5%; }
-p { color: var(--muted); }
-a { color: var(--ink); }
+.layer {
+  flex: 0 0 var(--unit);
+  animation: pour .18s ease-out;
+}
+@keyframes pour {
+  from { flex-basis: 0; opacity: .4; }
+  to { flex-basis: var(--unit); opacity: 1; }
+}
+
+/* Repère de la couleur de collecte : le collecteur n'accepte qu'elle, même
+   vide, et le joueur doit pouvoir le lire avant d'essayer (décision D4). */
+.bottle__mark {
+  position: absolute;
+  left: 50%;
+  bottom: .35rem;
+  width: .8rem;
+  height: .8rem;
+  margin-left: -.4rem;
+  border-radius: 50%;
+  background: var(--collect-color);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .25);
+}
+/* Le collecteur compte jusqu'à seize unités : à l'échelle des bouteilles
+   standard il dépasserait l'écran d'un téléphone. Ses couches sont donc plus
+   fines — c'est aussi ce que fait le jeu de référence. */
+.bottle--collector { width: 3rem; --unit: .85rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bottle, .layer { transition: none; animation: none; }
+}
