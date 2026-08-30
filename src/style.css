@@ -6,11 +6,20 @@
   --glass: rgba(255, 255, 255, .08);
   --rim: rgba(255, 255, 255, .22);
 
-  --liquid-orange: #f07216;
-  --liquid-green: #34a83a;
-  --liquid-blue: #1f86c8;
-  --liquid-dark: #2b2f45;
-  --liquid-white: #eef1fb;
+  /* Palette calée sur la LUMINANCE, pas seulement sur la teinte. Les valeurs
+     d'origine mettaient l'orange et le vert à luminance quasi identique
+     (0,30 et 0,29) : sous deutéranopie, les deux couleurs les plus fréquentes
+     du jeu devenaient indiscernables. Les luminances relatives sont désormais
+     étagées — 0,03 / 0,14 / 0,29 / 0,45 / 0,89 — ce qui les sépare même sans
+     percevoir la teinte. L'écart minimal est vérifié par `palette.test.ts`. */
+  --liquid-dark: #262b40;
+  --liquid-green: #1e7a32;
+  --liquid-blue: #2f9be0;
+  --liquid-orange: #ff9a2e;
+  --liquid-white: #f2f4fb;
+
+  --cork: #c8873f;
+  --cork-dark: #a06a2c;
 
   --bottle-width: 2.5rem;
   --unit: 1.35rem;
@@ -56,6 +65,20 @@ h1 { margin: 0 0 .5rem; font-size: clamp(2.2rem, 10vw, 3.2rem); letter-spacing: 
 .mode strong { font-size: 1.1rem; }
 .mode span { font-size: .875rem; opacity: .85; }
 .mode--secondary { background: var(--glass); box-shadow: inset 0 0 0 1px var(--rim); color: var(--ink); }
+
+.toggle {
+  margin: 0 0 2rem;
+  padding: .45rem .9rem;
+  border: 0;
+  border-radius: .55rem;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rim);
+  color: var(--muted);
+  font: inherit;
+  font-size: .85rem;
+  cursor: pointer;
+}
+.toggle[aria-pressed='true'] { color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
 
 .campaign__label {
   margin: 0 0 .5rem;
@@ -152,22 +175,44 @@ h1 { margin: 0 0 .5rem; font-size: clamp(2.2rem, 10vw, 3.2rem); letter-spacing: 
   box-shadow: inset 0 0 0 1px var(--rim);
   cursor: pointer;
   transition: transform .12s ease, box-shadow .12s ease;
-  overflow: hidden;
+  /* Le rognage appartient au liquide, pas à la bouteille : sinon le bouchon,
+     qui déborde par le haut, se retrouve coupé en deux. */
+  overflow: visible;
 }
 .bottle:disabled { cursor: default; opacity: .75; }
 .bottle.is-selected { transform: translateY(-.6rem); box-shadow: inset 0 0 0 2px #fff; }
-.bottle.is-corked { box-shadow: inset 0 0 0 1px var(--rim), 0 0 0 3px rgba(193, 137, 62, .9); }
+.bottle.is-corked { box-shadow: inset 0 0 0 1px var(--rim); }
+
+/* Bouchon de liège : le signal de victoire, posé bouteille par bouteille. */
+.bottle__cork {
+  position: absolute;
+  top: -.35rem;
+  left: 50%;
+  width: 1.5rem;
+  height: .75rem;
+  margin-left: -.75rem;
+  border-radius: .25rem .25rem .15rem .15rem;
+  background: linear-gradient(180deg, var(--cork) 0%, var(--cork-dark) 100%);
+  box-shadow: 0 .1rem .2rem rgba(0, 0, 0, .35);
+  animation: cork-in .28s cubic-bezier(.34, 1.56, .64, 1);
+}
+@keyframes cork-in {
+  from { transform: translateY(-.9rem) scale(.7); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
 
 .bottle__liquid {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column-reverse;
+  border-radius: inherit;
+  overflow: hidden;
 }
-.layer {
-  flex: 0 0 var(--unit);
-  animation: pour .18s ease-out;
-}
+.layer { flex: 0 0 var(--unit); }
+/* Seules les couches qui viennent d'être versées s'animent : animer toutes les
+   couches à chaque rendu produisait un clignotement à chaque appui. */
+.layer--new { animation: pour .18s ease-out; }
 @keyframes pour {
   from { flex-basis: 0; opacity: .4; }
   to { flex-basis: var(--unit); opacity: 1; }
@@ -191,6 +236,64 @@ h1 { margin: 0 0 .5rem; font-size: clamp(2.2rem, 10vw, 3.2rem); letter-spacing: 
    fines — c'est aussi ce que fait le jeu de référence. */
 .bottle--collector { width: 3rem; --unit: .85rem; }
 
+/* Mode motifs : sans lui, le jeu repose entièrement sur la distinction des
+   couleurs. Chaque couleur reçoit une trame distincte, lisible même quand la
+   teinte ne l'est pas. */
+[data-patterns] .layer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: .5;
+}
+[data-patterns] .layer { position: relative; }
+[data-patterns] .layer[data-color='orange']::after {
+  background: repeating-linear-gradient(45deg, rgba(0, 0, 0, .5) 0 3px, transparent 3px 8px);
+}
+[data-patterns] .layer[data-color='green']::after {
+  background: repeating-linear-gradient(-45deg, rgba(255, 255, 255, .55) 0 3px, transparent 3px 8px);
+}
+[data-patterns] .layer[data-color='blue']::after {
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .45) 0 3px, transparent 3px 9px);
+}
+[data-patterns] .layer[data-color='dark']::after {
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, .6) 1.5px, transparent 2px);
+  background-size: 8px 8px;
+}
+[data-patterns] .layer[data-color='white']::after {
+  background: repeating-linear-gradient(90deg, rgba(0, 0, 0, .35) 0 3px, transparent 3px 9px);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .bottle, .layer { transition: none; animation: none; }
+  .bottle, .layer, .layer--new, .bottle__cork, .stream { transition: none; animation: none; }
+}
+
+/* --- Animation de versement --- */
+
+.board { position: relative; }
+
+.bottle.is-pouring {
+  z-index: 10;
+  transform-origin: bottom center;
+  transform: translate(var(--dx), var(--dy)) rotate(var(--tilt));
+  transition: transform var(--pour-travel) cubic-bezier(.4, 0, .2, 1);
+}
+.bottle.is-returning {
+  z-index: 10;
+  transform-origin: bottom center;
+  transition: transform var(--pour-return) cubic-bezier(.4, 0, .2, 1);
+}
+
+/* Le filet de liquide, du goulot penché vers la bouteille visée. */
+.stream {
+  position: absolute;
+  width: .3rem;
+  margin-left: -.15rem;
+  border-radius: .15rem;
+  pointer-events: none;
+  transform-origin: top center;
+  animation: stream-in .12s ease-out;
+}
+@keyframes stream-in {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
 }

@@ -556,11 +556,19 @@ jamais silencieusement réinterprété.
 
 Point non négociable dans un jeu dont **toute** la mécanique repose sur la couleur :
 
-- Palette distinguable en cas de deutéranopie / protanopie ; ne jamais faire cohabiter dans un
-  même niveau deux couleurs proches en luminance et en teinte.
-- Mode d'appoint : **motif ou symbole** par couleur, activable en option.
+- **Palette étagée en luminance, pas seulement en teinte.** Le premier jeu de couleurs plaçait
+  l'orange et le vert — les deux plus fréquents — à des luminances relatives de 0,306 et 0,291 :
+  sous deutéranopie, les deux couleurs dominantes du jeu devenaient indiscernables. La palette
+  retenue les étage à 0,03 / 0,14 / 0,29 / 0,45 / 0,89, ce qui les sépare même sans perception
+  de la teinte. L'écart minimal est **vérifié par un test** qui lit la feuille de style, plutôt
+  que laissé à un commentaire qu'une retouche ferait mentir.
+- **Mode motifs** activable : une trame distincte par couleur (diagonales opposées, lignes
+  horizontales, verticales, pointillés). Préférence mémorisée localement, avec repli silencieux
+  si le stockage est refusé.
 - Contraste suffisant entre liquide et fond de plateau.
-- Aucune information critique portée uniquement par une animation.
+- Chaque bouteille est un bouton qui **décrit son contenu** du fond vers le goulot.
+- Aucune information critique portée uniquement par une animation ;
+  `prefers-reduced-motion` supprime bascule, filet et bouchon animés.
 
 ---
 

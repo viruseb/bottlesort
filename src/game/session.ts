@@ -1,6 +1,12 @@
 import { loadLevel } from '../engine/level'
+import { topRun } from '../engine/bottle'
 import { applyMove, canPour, isBlocked, isWon } from '../engine/rules'
-import { COLLECTOR, type GameState, type LevelSpec, type Move } from '../engine/types'
+import { COLLECTOR, type ColorId, type GameState, type LevelSpec, type Move } from '../engine/types'
+
+/** Dernier versement joué, de quoi l'animer. */
+export interface Pour extends Move {
+  readonly color: ColorId
+}
 
 export type Status = 'playing' | 'won' | 'blocked'
 
@@ -15,6 +21,7 @@ export class Session {
   private current: GameState
   private readonly history: Move[] = []
   selected: number | null = null
+  lastPour: Pour | null = null
 
   constructor(spec: LevelSpec) {
     this.spec = spec
@@ -61,8 +68,11 @@ export class Session {
       return false
     }
 
-    this.current = applyMove(this.current, { from: this.selected, to: index })
-    this.history.push({ from: this.selected, to: index })
+    const from = this.selected
+    const poured = topRun(this.current.bottles[from]!)
+    this.current = applyMove(this.current, { from, to: index })
+    this.history.push({ from, to: index })
+    this.lastPour = poured ? { from, to: index, color: poured.color } : null
     this.selected = null
     return true
   }
@@ -71,5 +81,6 @@ export class Session {
     this.current = this.initial
     this.history.length = 0
     this.selected = null
+    this.lastPour = null
   }
 }
